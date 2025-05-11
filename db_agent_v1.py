@@ -7,6 +7,7 @@
 import pandas as pd
 import sqlite3
 from sqlalchemy import create_engine, inspect
+import uuid
 
 engine = create_engine('sqlite:///feedbacks_db.db')
 inspector = inspect(engine)
@@ -42,15 +43,41 @@ tracer = LangChainTracer(project_name=langsmith_project_name)
 from langchain_openai import ChatOpenAI
 llm = ChatOpenAI(model='gpt-4o',temperature=0)
 
+# %% [markdown]
+# ### Create config
+
 # %%
-# config function for tracing in langsmith
 import datetime
 
-def create_config(run_name):
+def create_config(run_name: str, is_new_thread_id: bool = False, thread_id: str = None):
+    """
+    Create a config dictionary for LCEL runnables.
+    Includes LangSmith run tracing and optional thread_id management.
+
+    Args:
+        run_name (str): Descriptive run name shown in LangSmith.
+        is_new_thread_id (bool): Whether to generate a new thread_id.
+        thread_id (str): Optionally provide an existing thread_id to reuse.
+
+    Returns:
+        dict: Config dictionary with callbacks, run_name, and thread_id.
+
+    Use it like so (example): 
+        config, thread_id = create_config('create_sql_query_or_queries', True) (start a new thread)
+        config, _ = create_config('generate_answer', False, thread_id) (re-use same thread)
+    """
+
     time_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    run_name = f"{run_name} {time_now}"
-    config={'callbacks':[tracer], 'run_name': run_name}
-    return config
+    full_run_name = f"{run_name} {time_now}"
+    if is_new_thread_id or not thread_id:
+        thread_id = str(uuid.uuid4())
+
+    config={'callbacks': [tracer],
+            'run_name': run_name,
+            'configurable' : { 'thread_id':thread_id }
+            }
+
+    return config,thread_id
 
 # %% [markdown]
 # ### Constants
@@ -84,11 +111,9 @@ objects_documentation = """
   Table products -> column product_company_name relates to table feedback -> column product_company-name
   Table feedback -> column product_id relates to table products -> column product_id
   """
-  
-question = 'What can you tell me about the dataset?'
 
 # %% [markdown]
-# ### State of the graph
+# ### Define state
 
 # %%
 # define the state of the graph, which includes user's question, AI's answer, query that has been created and its result;
@@ -100,16 +125,16 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, System
 class State(TypedDict):
  messages_log: Sequence[BaseMessage]
  question: str
- sql_query: list[str]
- sql_query_explanation : list[str]
- sql_query_result: list[str]
- llm_answer: str
+ sql_queries: list[dict]
+ llm_answer: BaseMessage
 
+# %% [markdown]
+# ### Create sql query or queries
 
 # %%
 # create a function that generates the sql query to be executed
 
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, SystemMessagePromptTemplate
 
 class OutputAsAQuery(TypedDict):
   """ generated sql query or sql queries if there are multiple """
@@ -145,12 +170,15 @@ def create_sql_query_or_queries(state:State):
     ('system', system_prompt)
   )
 
-  chain = (prompt
-          | llm.with_structured_output(OutputAsAQuery)
-          | (lambda output: {'sql_query':output['query']} 
-        )  )
+  chain = prompt | llm.with_structured_output(OutputAsAQuery)
 
-  return chain.invoke({'objects_documentation':objects_documentation, 'question': state['question']},config = create_config('create_sql_query_or_queries'))
+  result = chain.invoke({'objects_documentation':objects_documentation, 'question': state['question']})
+  for q in result['query']:
+   state['sql_queries'].append( {'query': q,
+                                     'explanation': '', ## add it later
+                                     'result':'' ## add it later
+                                      } )
+  return state
 
 # %%
 # since gpt-4o allows a maximum completion limit (output context limit) of 4k tokens, I half it to get maximum context size, so 2k. Assuming the entire context is not just the data,
@@ -176,6 +204,9 @@ def check_if_exceed_maximum_context_limit(sql_query_result):
  else:
   return False
 
+# %% [markdown]
+# ### Create sql query explanation
+
 # %%
 # create a function that creates an explanation of a sql query
 
@@ -198,7 +229,7 @@ def create_sql_query_explanation(sql_query:str):
  )
 
  chain = prompt | llm
- sql_query_explanation = chain.invoke({'sql_query':sql_query},config = create_config('create_sql_query_explanation')).content
+ sql_query_explanation = chain.invoke({'sql_query':sql_query}).content
  return sql_query_explanation
 
 # %%
@@ -233,8 +264,11 @@ def refine_sql_query(question: str, sql_query: str, maximum_nr_tokens_sql_query:
  sql_query = chain.invoke({'question': question,
                'sql_query':sql_query,
                'maximum_nr_tokens_sql_query':maximum_nr_tokens_sql_query}
-               ,create_config('refine_sql_query'))
+               )
  return sql_query
+
+# %% [markdown]
+# ### Execute sql query
 
 # %%
 # the function checks if the query output exceeds context window limit and if yes, send the query for refinement
@@ -248,9 +282,10 @@ db = SQLDatabase(engine)
 def execute_sql_query(state:State):
   """ executes the sql query and retrieve the result """
 
-  for query_index, sql_query in enumerate(state['sql_query']):
-
-    print(f"🚀 Executing query {query_index+1}/{len(state['sql_query'])}...")
+  for query_index, q in enumerate(state['sql_queries']):
+     
+    sql_query = q['query'] 
+    print(f"🚀 Executing query {query_index+1}/{len(state['sql_queries'])}...")
     # refine the query 3 times if necessary.
     for i in range(3):
 
@@ -260,25 +295,31 @@ def execute_sql_query(state:State):
       if not check_if_exceed_maximum_context_limit(sql_query_result):
 
        sql_query_explanation = create_sql_query_explanation(sql_query)
-       state['sql_query_result'].append(sql_query_result)
-       state['sql_query_explanation'].append(sql_query_explanation)
+       state['sql_queries'][query_index]['result'] = sql_query_result
+       state['sql_queries'][query_index]['explanation'] = sql_query_explanation
+       state['sql_queries'][query_index]['query'] = sql_query
        break
 
       # if the sql query exceeds output context window and there is more room for iterations, refine the query
       else:
-        print(f"🔧 Refining query {query_index+1}/{len(state['sql_query'])} as its output its too large...")
+        print(f"🔧 Refining query {query_index+1}/{len(state['sql_queries'])} as its output its too large...")
         sql_query = refine_sql_query(state['question'],sql_query,maximum_nr_tokens_sql_query)['query']
 
       # if there is no more room for sql query iterations and the result still exceeds context window, throw a message
 
     else:
       print(f"⚠️ Query result too large after 3 refinements.")
-      state['sql_query_result'].append('Query result too large after 3 refinements.')
-      state['sql_query_explanation'].append("Refinement failed.")
+      state['sql_queries'][query_index]['result'] = 'Query result too large after 3 refinements.'
+      state['sql_queries'][query_index]['explanation'] = "Refinement failed."
+      
+  return state
 
 # %% [markdown]
 # ### Extract metadata from sql query
+# 
+# 
 
+# %%
 import sqlglot
 from sqlglot import parse_one, exp
 
@@ -325,7 +366,7 @@ def extract_metadata_from_sql_query(sql_query):
  return sql_query_metadata
 
 # %%
-def create_explanation(sql_queries: list[str]):
+def create_explanation(sql_queries: list[dict]):
  """ based on the sql query metadata that was parsed, it creates a natural language message describing filters and transformations used by the query"""
 
  tables = []
@@ -333,9 +374,9 @@ def create_explanation(sql_queries: list[str]):
  aggregations = []
  groupings = []
 
- for item in sql_queries:
+ for query_index,q in enumerate(sql_queries):
  # get sql query metadata
-  sql_query = item
+  sql_query = q['query']
   sql_query_metadata = extract_metadata_from_sql_query(sql_query)
 
   if sql_query_metadata['tables']:
@@ -376,170 +417,99 @@ def create_explanation(sql_queries: list[str]):
  return sql_query_explanation
 
 # %% [markdown]
-# ### Manage memory and chat history
-
-def manage_memory_chat_history(state:State):
-    """ Manages the chat history so that it does not become too large in terms of output tokens.
-    Specifically, it checks if the chat history is larger than 1000 tokens. If yes, keep just the last 2 pairs of human prompts and AI responses, and summarize the older messages.
-    Additionally, check if the logs of sql queries is larger than 20 entries. If yes, delete the older records. """
-
-    tokens_chat_history = state['messages_log'][-1].response_metadata['token_usage']['total_tokens']        
-
-    if tokens_chat_history >= 1000 and len(state['messages_log']) > 4:
-        message_history_to_summarize = [msg.content for msg in state['messages_log'][:-4]]
-        prompt = ChatPromptTemplate.from_messages( [('user', 'Distill the below chat messages into a single summary paragraph.The summary paragraph should have maximum 400 tokens.Include as many specific details as you can.Chat messages:{message_history_to_summarize}') ])
-        runnable = prompt | llm
-        chat_history_summary = runnable.invoke({'message_history_to_summarize':message_history_to_summarize},config = create_config('manage_memory_chat_history'))
-        last_4_messages = state['messages_log'][-4:]
-        last_user_question = HumanMessage(state['question'])
-        #delete_messages = [RemoveMessage(id = msg.id) for msg in state['messages_log'][:-4]] # delete messages older than the last 4 
-        state['messages_log'] = [chat_history_summary] +[*last_4_messages] + [last_user_question]  
-
-    # Optional: Truncate SQL logs to the most recent 20
-    if len(state['sql_query']) > 20:
-        state['sql_query'] = state['sql_query'][-20:]
-        state['sql_query_explanation'] = state['sql_query_explanation'][-20:]
-        state['sql_query_result'] = state['sql_query_result'][-20:]
-
-    return state
+# ### Generate answer
 
 # %%
-messages_log = [
-    HumanMessage(content = 'How many companies are there?',id=1),
-    AIMessage(content = '''📣 Final Answer:
-
-There are 12 unique companies listed in the data. Keep in mind, though, that if there are any variations in how the company names are written (like different spellings or capitalization), it might affect the count slightly.
-
-I analyzed data based on the following filters and transformations:
-
-🧊 Tables: • company
-
-🧮 Aggregations: • COUNT(DISTINCT company.company_name)''',id=2),
-
-    HumanMessage(content = 'What can you tell me about the dataset?',id=3),
-    AIMessage(content = '''📣 Final Answer:
-
-The dataset provides some interesting insights:
-
-1. There are 12 unique companies listed in the dataset.
-2. On average, these companies have an annual revenue of about $26.3 trillion USD.
-3. There are 413,898 unique feedback entries, which means a lot of feedback has been collected.
-4. The average feedback rating is approximately 3.84 out of a possible scale (not specified here).
-5. There are 8,145 unique products in the dataset.
-
-These numbers give a broad overview of the dataset, showing a diverse range of companies, a significant amount of feedback, and a large variety of products. However, it doesn't dive into specifics like industry types, regional data, or detailed company attributes.
-
-I analyzed data based on the following filters and transformations:
-
-🧊 Tables: • company • feedback • products
-
-🧮 Aggregations: • COUNT(DISTINCT company.company_name) • AVG(company.annual_revenue_usd) • COUNT(DISTINCT feedback.feedback_id) • AVG(feedback.feedback_rating) • COUNT(DISTINCT products.product_id)',id=5),
-    HumanMessage(content = 'tell me a joke about rum refering to my name''',id=4),
-   
-    HumanMessage(content = 'Can you share the average feedback rating per company?',id=5),
-    AIMessage(content = '''📣 Final Answer:
-
-Sure! Here's the average feedback rating for each company based on the data we have:
-
-- Adidas: 4.06
-- Apple: 3.85
-- AT&T: 3.66
-- Cisco: 3.37
-- Google: 3.56
-- Microsoft: 3.91
-- Nike: 3.95
-- Samsung: 3.87
-- Sony: 3.83
-- Target: 3.33
-- Verizon: 3.84
-- Walmart: 3.31
-
-These numbers represent the average feedback ratings from customers for each company. Keep in mind that this is a straightforward average and doesn't account for things like the number of feedback entries or any unusual ratings that might affect the average.
-
-I analyzed data based on the following filters and transformations:
-...
-
-🧮 Aggregations: • AVG(feedback.feedback_rating)
-
-📦 Groupings: • feedback.product_company_name''',id=6),
+def format_sql_queries_for_prompt (sql_queries : list[dict]) -> str:
+    # expects a dictionary with a structure like query, explanation, result
     
-    HumanMessage(content = 'fine, and how many products each company has?',id=7),
-    AIMessage(content = '''📣 Final Answer:
+    formatted_queries = []
+    for query_index,q in enumerate(sql_queries):
+        formatted_queries.append(f"Query {query_index+1} explanation:\n {q['explanation']}\n\n Query {query_index+1} result:\n {q['result']}")
+    return "\n\n".join(formatted_queries)
 
-Sure! Here's a quick rundown of how many products each company has:
-
-- Adidas has 181 products.
-- Apple offers 1,178 products.
-- AT&T has 134 products.
-- Cisco has 9 products.
-- Google has 459 products.
-- Microsoft offers 75 products.
-- Nike has 115 products.
-- Samsung has a whopping 4,801 products.
-- Sony offers 780 products.
-- Target has 2 products.
-- Verizon has 405 products.
-- Walmart has 6 products.
-
-This list includes all companies, even those with no products, thanks to the way the data was gathered.
-
-I analyzed data based on the following filters and transformations:
-...
-
-🧮 Aggregations: • COUNT(products.product_id)
-
-📦 Groupings: • company.company_name''',
-              response_metadata = { 'token_usage' : {'total_tokens' : 1200 } },
-              id=8  ) 
-
-]
-
-question = 'what is the first company you listed in your previous response?'
+# print(format_sql_queries_for_prompt(test_state['sql_queries']))
 
 # %%
 ## create a function that generates the agent answer based on sql query result
+
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain.schema.output_parser import StrOutputParser
 
 def generate_answer(state:State):
   """ generates the AI answer taking into consideration the explanation and the result of the sql query that was executed """
 
   system_prompt = """ You are a decision support consultant helping users become more data-driven.
-     Your task is to answer the user question based on the following information:
+     Your task is to answer the user question using the result of the sql queries:
 
- - The sql query result which is the result of a query created for the purpose of answering the question.
- - The query explanation is a short explanation of the query making you aware of its limitations and underlying assumptions.
+ - The sql queries were created for the purpose of answering the user question.
+ - The query explanations are short descriptions of the query making you aware of its limitations and underlying assumptions.
 
  User question:
  {question}
 
- SQL query explanation:
- {sql_query_explanation}
-
- SQL query result:
- {sql_query_result}
+ Context from SQL queries:
+ {context_sql_queries}
 
  Take into account the insights from this explanation in your answer.
  Answer in simple terms, conversational, non-technical language. Be concise.
  """
 
   prompt = ChatPromptTemplate.from_messages([
-    SystemMessage(content = system_prompt),
-    MessagesPlaceholder("messages_log")
-  ]
-  )
+    ('system',system_prompt),
+    MessagesPlaceholder("messages_log")          
+  ] )
 
-  chain = (prompt
-        | llm
-        | (lambda output: {'llm_answer': f"{output.content}\n\n{create_explanation(state['sql_query'])}"})
-  )
+  llm_answer_chain = prompt | llm 
+  final_answer_chain = { 'llm_answer': llm_answer_chain, 'input_state': RunnablePassthrough() } | RunnableLambda (lambda x: { 'ai_message': AIMessage( content = f"{x['llm_answer'].content}\n\n{create_explanation(x['input_state']['sql_queries'])}", 
+                                                                                                                                                        response_metadata = x['llm_answer'].response_metadata  ) } ) 
 
-  return chain.invoke({ 'messages_log': state['messages_log'],
-                     'question':state['question'],
-                     'sql_query_explanation':state['sql_query_explanation'],
-                     'sql_query_result':state['sql_query_result']}
-                     ,config = create_config('generate_answer'))
+  result = final_answer_chain.invoke({ 'messages_log':state['messages_log'],
+               'question':state['question'],
+               'context_sql_queries': format_sql_queries_for_prompt(state['sql_queries']),
+              'sql_queries': state['sql_queries'] })
+  
+  ai_msg = result['ai_message']
+
+  explanation_token_count = llm.get_num_tokens(create_explanation(state['sql_queries']))
+  ai_msg.response_metadata['token_usage']['total_tokens'] += explanation_token_count
+
+  state['llm_answer'] = ai_msg
+  state['messages_log'].append(HumanMessage(state['question']))
+  state['messages_log'].append(ai_msg)
+
+  return state
 
 # %% [markdown]
-# ### assemble the graph
+# ### Manage memory and chat history
+
+# %%
+def manage_memory_chat_history(state:State):
+    """ Manages the chat history so that it does not become too large in terms of output tokens.
+    Specifically, it checks if the chat history is larger than 1000 tokens. If yes, keep just the last 4 pairs of human prompts and AI responses, and summarize the older messages.
+    Additionally, check if the logs of sql queries is larger than 20 entries. If yes, delete the older records. """           
+
+    tokens_chat_history = state['messages_log'][-1].response_metadata.get('token_usage', {}).get('total_tokens', 0) if state['messages_log'] else 0
+    
+
+    if tokens_chat_history >= 1000 and len(state['messages_log']) > 4:
+        message_history_to_summarize = [msg.content for msg in state['messages_log'][:-4]]
+        prompt = ChatPromptTemplate.from_messages( [('user', 'Distill the below chat messages into a single summary paragraph.The summary paragraph should have maximum 400 tokens.Include as many specific details as you can.Chat messages:{message_history_to_summarize}') ])
+        runnable = prompt | llm
+        chat_history_summary = runnable.invoke({'message_history_to_summarize':message_history_to_summarize})
+        last_4_messages = state['messages_log'][-4:]
+        state['messages_log'] = [chat_history_summary] +[*last_4_messages]
+    else:
+        state['messages_log'] = state['messages_log']
+
+    # Truncate SQL logs to the most recent 20
+    if len(state['sql_queries']) > 20:
+        state['sql_queries']= state['sql_queries'][-20:]    
+        
+    return state
+
+# %% [markdown]
+# ### Assemble graph
 
 # %%
 # assemble graph
@@ -555,130 +525,75 @@ graph.add_node("manage_memory_chat_history",manage_memory_chat_history)
 
 graph.add_edge(START,"create_sql_query_or_queries")
 graph.add_edge("create_sql_query_or_queries","execute_sql_query")
-graph.add_edge("execute_sql_query","manage_memory_chat_history")
-graph.add_edge("manage_memory_chat_history","generate_answer")
-graph.add_edge("generate_answer",END)
+graph.add_edge("execute_sql_query","generate_answer")
+graph.add_edge("generate_answer","manage_memory_chat_history")
+graph.add_edge("manage_memory_chat_history",END)
 
 memory = MemorySaver()
 graph = graph.compile(checkpointer=memory)
 
 # %% [markdown]
+# 
 # ### test the agent
 
 # %%
-messages_log = [
-    HumanMessage(content = 'How many companies are there?',id=1),
-    AIMessage(content = '''📣 Final Answer:
+# Start a new conversation
 
-There are 12 unique companies listed in the data. Keep in mind, though, that if there are any variations in how the company names are written (like different spellings or capitalization), it might affect the count slightly.
-
-I analyzed data based on the following filters and transformations:
-
-🧊 Tables: • company
-
-🧮 Aggregations: • COUNT(DISTINCT company.company_name)''',id=2),
-
-    HumanMessage(content = 'What can you tell me about the dataset?',id=3),
-    AIMessage(content = '''📣 Final Answer:
-
-The dataset provides some interesting insights:
-
-1. There are 12 unique companies listed in the dataset.
-2. On average, these companies have an annual revenue of about $26.3 trillion USD.
-3. There are 413,898 unique feedback entries, which means a lot of feedback has been collected.
-4. The average feedback rating is approximately 3.84 out of a possible scale (not specified here).
-5. There are 8,145 unique products in the dataset.
-
-These numbers give a broad overview of the dataset, showing a diverse range of companies, a significant amount of feedback, and a large variety of products. However, it doesn't dive into specifics like industry types, regional data, or detailed company attributes.
-
-I analyzed data based on the following filters and transformations:
-
-🧊 Tables: • company • feedback • products
-
-🧮 Aggregations: • COUNT(DISTINCT company.company_name) • AVG(company.annual_revenue_usd) • COUNT(DISTINCT feedback.feedback_id) • AVG(feedback.feedback_rating) • COUNT(DISTINCT products.product_id)',id=5),
-    HumanMessage(content = 'tell me a joke about rum refering to my name''',id=4),
-   
-    HumanMessage(content = 'Can you share the average feedback rating per company?',id=5),
-    AIMessage(content = '''📣 Final Answer:
-
-Sure! Here's the average feedback rating for each company based on the data we have:
-
-- Adidas: 4.06
-- Apple: 3.85
-- AT&T: 3.66
-- Cisco: 3.37
-- Google: 3.56
-- Microsoft: 3.91
-- Nike: 3.95
-- Samsung: 3.87
-- Sony: 3.83
-- Target: 3.33
-- Verizon: 3.84
-- Walmart: 3.31
-
-These numbers represent the average feedback ratings from customers for each company. Keep in mind that this is a straightforward average and doesn't account for things like the number of feedback entries or any unusual ratings that might affect the average.
-
-I analyzed data based on the following filters and transformations:
-...
-
-🧮 Aggregations: • AVG(feedback.feedback_rating)
-
-📦 Groupings: • feedback.product_company_name''',id=6),
-    
-    HumanMessage(content = 'fine, and how many products each company has?',id=7),
-    AIMessage(content = '''📣 Final Answer:
-
-Sure! Here's a quick rundown of how many products each company has:
-
-- Adidas has 181 products.
-- Apple offers 1,178 products.
-- AT&T has 134 products.
-- Cisco has 9 products.
-- Google has 459 products.
-- Microsoft offers 75 products.
-- Nike has 115 products.
-- Samsung has a whopping 4,801 products.
-- Sony offers 780 products.
-- Target has 2 products.
-- Verizon has 405 products.
-- Walmart has 6 products.
-
-This list includes all companies, even those with no products, thanks to the way the data was gathered.
-
-I analyzed data based on the following filters and transformations:
-...
-
-🧮 Aggregations: • COUNT(products.product_id)
-
-📦 Groupings: • company.company_name''',
-              response_metadata = { 'token_usage' : {'total_tokens' : 1200 } },
-              id=8  ) 
-
-]
-
-#messages_log = []
-
-question = 'what is the first company you listed in your previous response?'
+question = 'How many companies are there?'
+messages_log = []
 
 initial_dict = {'objects_documentation':objects_documentation,
      'messages_log': messages_log,
      'question':question,
-     'sql_query': [],
-     'sql_query_result': [],
-     'sql_query_explanation': [],
-     'llm_answer': ''
+     'sql_queries': [],
+     'llm_answer': []
      }
 
-thread_id = 'abc139'
-config = { 'configurable' : { 'thread_id':thread_id} }
-
+config, thread_id = create_config('Run Agent',True)
 if __name__ == "__main__":
  for step in graph.stream(initial_dict, config = config, stream_mode="updates"):
    step_name, output = list(step.items())[0]
    if step_name == 'create_sql_query_or_queries':
-    print(f"✅ SQL queries created:{len(output['sql_query'])}")
+    print(f"✅ SQL queries created:{len(output['sql_queries'])}")
    elif step_name == 'execute_sql_query':
     print("⚙️ Analysing results...")
    elif step_name == 'generate_answer':
     print("\n📣 Final Answer:\n")
-    print(output['llm_answer'])
+    print(output['llm_answer'].content)
+
+# %%
+# Continue the conversation
+
+initial_dict['question'] = 'follow up question' 
+
+
+config, _ = create_config('Run Agent',False,thread_id)
+if __name__ == "__main__":
+ for step in graph.stream(initial_dict, config = config, stream_mode="updates"):
+   step_name, output = list(step.items())[0]
+   if step_name == 'create_sql_query_or_queries':
+    print(f"✅ SQL queries created:{len(output['sql_queries'])}")
+   elif step_name == 'execute_sql_query':
+    print("⚙️ Analysing results...")
+   elif step_name == 'generate_answer':
+    print("\n📣 Final Answer:\n")
+    print(output['llm_answer'].content)
+
+# %% [markdown]
+# ### Testing Locally
+
+# %%
+# question = 'How many companies are there?'
+
+# test_state = {'messages_log':[],
+#  'question':question,
+#  'sql_queries': [],
+#  'llm_answer': []
+#  }
+# create_sql_query_or_queries(test_state)
+# execute_sql_query(test_state)
+# generate_answer(test_state)
+# manage_memory_chat_history(test_state)
+# #test_state 
+
+
