@@ -78,6 +78,17 @@ def create_config(run_name: str, is_new_thread_id: bool = False, thread_id: str 
 
     return config,thread_id
 
+def show_progress(message):
+    """Display progress message in Streamlit if available, otherwise print"""
+    try:
+        import streamlit as st
+        if hasattr(st, 'session_state') and 'progress_messages' in st.session_state:
+            st.session_state.progress_messages.append(message)
+        else:
+            print(message)
+    except:
+        print(message)
+
 vector_store = None
 
 objects_documentation = '''Table company: List of public companies. Granularity is company-name. Column (prefixed with table name):
@@ -404,7 +415,7 @@ def create_sql_query_or_queries(state:State):
                                      'metadata':'' ## add it later
                                       } )
   
-  print(f"✅ SQL queries created:{len(state['current_sql_queries'])}")
+  show_progress(f"✅ SQL queries created:{len(state['current_sql_queries'])}")
   
   # control flow
   action = AgentAction(tool='create_sql_query_or_queries', tool_input='',log='tool ran successfully')
@@ -627,7 +638,7 @@ db = SQLDatabase(engine)
 def execute_sql_query(state:State):
   """ executes the sql query and retrieve the result """
   
-  print("⚙️ Analysing results...")
+  show_progress("⚙️ Analysing results...")
   for query_index, q in enumerate(state['current_sql_queries']):
      
     if state['current_sql_queries'][query_index]['result'] == '':    
@@ -660,7 +671,7 @@ def execute_sql_query(state:State):
 
        # if the sql query exceeds output context window and there is more room for iterations, refine the query
        else:
-        print(f"🔧 Refining query {query_index+1}/{len(state['current_sql_queries'])} as its output its too large...")
+        show_progress(f"🔧 Refining query {query_index+1}/{len(state['current_sql_queries'])} as its output its too large...")
         sql_query = refine_sql_query(state['analytical_intent'],sql_query,state['objects_documentation'],state['database_content'],state['sql_dialect'])['query']
 
        # if there is no more room for sql query iterations and the result still exceeds context window, throw a message
@@ -936,7 +947,7 @@ def generate_answer(state:State):
   state['messages_log'].append(HumanMessage(state['current_question']))
   state['messages_log'].append(ai_msg) 
 
-  print("\n📣 Final Answer:\n")
+  show_progress("📣 Final Answer:")
   return state
 
 def manage_memory_chat_history(state:State):
