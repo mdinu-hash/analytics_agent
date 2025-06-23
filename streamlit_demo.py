@@ -4,21 +4,6 @@ import requests
 import uuid
 from pathlib import Path
 from langchain_core.messages import HumanMessage, AIMessage
-import io
-import contextlib
-import sys
-
-# Context manager to capture print statements
-@contextlib.contextmanager
-def capture_prints():
-    """Capture print statements and return them as a list"""
-    old_stdout = sys.stdout
-    stdout_capture = io.StringIO()
-    sys.stdout = stdout_capture
-    try:
-        yield stdout_capture
-    finally:
-        sys.stdout = old_stdout
 
 # Configuration
 GITHUB_REPO = "mdinu-hash/db_agent_v1"  
@@ -114,12 +99,13 @@ with st.sidebar:
     - 12 companies (Apple, Samsung, Sony, Nike, etc.)
     - Ratings from 1-5 stars
     """)
+    
     # Show database status
     if os.path.exists(DATABASE_FILE):
-      file_size = os.path.getsize(DATABASE_FILE) / (1024*1024)
-      st.sidebar.markdown(f"**Status:** Database Connected")
+        file_size = os.path.getsize(DATABASE_FILE) / (1024*1024)
+        st.sidebar.markdown(f"**Status:** ✅ Database Connected")
     else:
-       st.sidebar.markdown("**Status:** Database Not Available")
+        st.sidebar.markdown("**Status:** ❌ Database Not Available")
 
     # Clear chat button in sidebar
     st.markdown("---")
@@ -128,7 +114,6 @@ with st.sidebar:
         st.session_state.thread_id = str(uuid.uuid4())
         st.session_state.progress_messages = []  # Clear progress messages too
         st.rerun()   
- 
 
 # Display chat messages
 for message in st.session_state.messages:
