@@ -94,6 +94,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid.uuid4())
+if "progress_messages" not in st.session_state:
+    st.session_state.progress_messages = []
 
 #### UI
 
@@ -119,12 +121,14 @@ with st.sidebar:
     else:
        st.sidebar.markdown("**Status:** Database Not Available")
 
-    # Clear chat button in sidebar - SIMPLE SOLUTION
+    # Clear chat button in sidebar
     st.markdown("---")
     if st.button("🗑️ Clear & Start New Chat", use_container_width=True, type="secondary"):
         st.session_state.messages = []
         st.session_state.thread_id = str(uuid.uuid4())
+        st.session_state.progress_messages = []  # Clear progress messages too
         st.rerun()   
+ 
 
 # Display chat messages
 for message in st.session_state.messages:
@@ -151,6 +155,9 @@ if prompt := st.chat_input("Ask about the database..."):
             progress_placeholder = st.empty()
         
         try:
+            # Clear previous progress messages
+            st.session_state.progress_messages = []
+            
             # Convert session messages to your agent's format
             messages_log = []
             for msg in st.session_state.messages[:-1]:  # Exclude the current message
@@ -175,41 +182,34 @@ if prompt := st.chat_input("Ask about the database..."):
                 }
                 config, st.session_state.thread_id = create_config('Run Agent', True)
                 
-                # Capture prints during agent execution
-                with capture_prints() as captured:
-                    result = graph.invoke(initial_dict, config=config)
+                # Run agent and monitor progress
+                result = graph.invoke(initial_dict, config=config)
                     
             else:  # Continuing conversation
                 config, _ = create_config('Run Agent', False, st.session_state.thread_id)
                 
-                # Capture prints during agent execution
-                with capture_prints() as captured:
-                    result = graph.invoke({'current_question': prompt}, config=config)
+                # Run agent and monitor progress
+                result = graph.invoke({'current_question': prompt}, config=config)
             
-            # Process captured prints and show progress
-            captured_output = captured.getvalue()
-            if captured_output.strip():
-                # Split by lines and show each progress message
-                progress_lines = [line.strip() for line in captured_output.split('\n') if line.strip()]
-                
-                # Show progress messages
-                for i, line in enumerate(progress_lines):
-                    if line.startswith('✅'):
-                        status_placeholder.success(line)
-                    elif line.startswith('⚙️'):
-                        status_placeholder.info(line)
-                    elif line.startswith('🔧'):
-                        status_placeholder.warning(line)
-                    elif line.startswith('⚠️'):
-                        status_placeholder.error(line)
-                    elif line.startswith('📣'):
-                        status_placeholder.success(line)
+            # Display progress messages that were collected
+            if st.session_state.progress_messages:
+                for i, message in enumerate(st.session_state.progress_messages):
+                    if message.startswith('✅'):
+                        status_placeholder.success(message)
+                    elif message.startswith('⚙️'):
+                        status_placeholder.info(message)
+                    elif message.startswith('🔧'):
+                        status_placeholder.warning(message)
+                    elif message.startswith('⚠️'):
+                        status_placeholder.error(message)
+                    elif message.startswith('📣'):
+                        status_placeholder.success(message)
                         # Clear progress after final message
                         import time
                         time.sleep(1)
                         progress_container.empty()
                     else:
-                        progress_placeholder.text(line)
+                        progress_placeholder.text(message)
             
             # Show final response
             with response_container:
