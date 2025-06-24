@@ -1,9 +1,13 @@
+
 import streamlit as st
 import os
 import requests
 import uuid
+import time  # <-- ADD THIS IMPORT (you were missing it)
 from pathlib import Path
 from langchain_core.messages import HumanMessage, AIMessage
+import threading
+import queue
 
 # Configuration
 GITHUB_REPO = "mdinu-hash/db_agent_v1"  
@@ -74,19 +78,21 @@ except Exception as e:
     st.info("Make sure db_agent_v1.py is in the same directory and the database is available.")
     st.stop()
 
+progress_queue = queue.Queue()
+db_agent_v1.set_progress_queue(progress_queue)
+
 # Initialize session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid.uuid4())
-if "progress_messages" not in st.session_state:
-    st.session_state.progress_messages = []
 
 #### UI
 
 st.set_page_config(page_title="DB Agent Demo", page_icon="🤖", layout="wide")
 st.title("🤖 Database Query Agent Demo")
 st.markdown("Ask questions about the feedback database and get insights!")
+st.text("Placeholder for some more info")
 
 # Sidebar with database info
 with st.sidebar:
@@ -112,8 +118,6 @@ with st.sidebar:
     if st.button("🗑️ Clear & Start New Chat", use_container_width=True, type="secondary"):
         st.session_state.messages = []
         st.session_state.thread_id = str(uuid.uuid4())
-        st.session_state.progress_messages = []  # Clear progress messages too
-        st.rerun()   
 
 # Display chat messages
 for message in st.session_state.messages:
@@ -131,81 +135,79 @@ if prompt := st.chat_input("Ask about the database..."):
     
     # Generate response
     with st.chat_message("assistant"):
-        # Create containers for progress and final response
-        progress_container = st.container()
+      try:
+        # Create containers for progress updates
+        status_placeholder = st.empty()
+        progress_placeholder = st.empty()
         response_container = st.container()
-        
-        with progress_container:
-            status_placeholder = st.empty()
-            progress_placeholder = st.empty()
-        
-        try:
-            # Clear previous progress messages
-            st.session_state.progress_messages = []
-            
-            # Convert session messages to your agent's format
-            messages_log = []
-            for msg in st.session_state.messages[:-1]:  # Exclude the current message
-                if msg["role"] == "user":
-                    messages_log.append(HumanMessage(content=msg["content"]))
-                else:
-                    messages_log.append(AIMessage(content=msg["content"]))
-            
-            # Prepare state for your agent
-            if len(messages_log) == 0:  # First message
-                initial_dict = {
-                    'objects_documentation': objects_documentation,
-                    'database_content': database_content,
-                    'sql_dialect': sql_dialect,
-                    'messages_log': messages_log,
-                    'intermediate_steps': [],
-                    'analytical_intent': [],
-                    'current_question': prompt,
-                    'current_sql_queries': [],
-                    'generate_answer_details': {},
-                    'llm_answer': AIMessage(content='')
-                }
-                config, st.session_state.thread_id = create_config('Run Agent', True)
-                
-                # Run agent and monitor progress
-                result = graph.invoke(initial_dict, config=config)
-                    
-            else:  # Continuing conversation
-                config, _ = create_config('Run Agent', False, st.session_state.thread_id)
-                
-                # Run agent and monitor progress
-                result = graph.invoke({'current_question': prompt}, config=config)
-            
-            # Display progress messages that were collected
-            if st.session_state.progress_messages:
-                for i, message in enumerate(st.session_state.progress_messages):
-                    if message.startswith('✅'):
-                        status_placeholder.success(message)
-                    elif message.startswith('⚙️'):
-                        status_placeholder.info(message)
-                    elif message.startswith('🔧'):
-                        status_placeholder.warning(message)
-                    elif message.startswith('⚠️'):
-                        status_placeholder.error(message)
-                    elif message.startswith('📣'):
-                        status_placeholder.success(message)
-                        # Clear progress after final message
-                        import time
-                        time.sleep(1)
-                        progress_container.empty()
+
+        # Convert chat history to LangGraph format
+        messages_log = []
+        for msg in st.session_state.messages[:-1]:  # exclude current user prompt
+            if msg["role"] == "user":
+                messages_log.append(HumanMessage(content=msg["content"]))
+            else:
+                messages_log.append(AIMessage(content=msg["content"]))
+
+        # Prepare agent input state
+        if len(messages_log) == 0:  # first message
+            state_dict = {
+                'objects_documentation': objects_documentation,
+                'database_content': database_content,
+                'sql_dialect': sql_dialect,
+                'messages_log': messages_log,
+                'intermediate_steps': [],
+                'analytical_intent': [],
+                'current_question': prompt,
+                'current_sql_queries': [],
+                'generate_answer_details': {},
+                'llm_answer': AIMessage(content='')
+            }
+            config, st.session_state.thread_id = create_config('Run Agent', True)
+        else:  # continuation
+            state_dict = {
+                'current_question': prompt
+            }
+            config, _ = create_config('Run Agent', False, st.session_state.thread_id)
+
+        # Start streaming
+        progress_log = []
+        final_state = None
+
+        for step in graph.stream(state_dict, config=config, stream_mode="updates"):
+            step_name, output = list(step.items())[0]
+            final_state = output  # Keep most recent full state
+
+            # Check for progress message from db_agent_v1.show_progress()
+            while not db_agent_v1._progress_queue.empty():
+                try:
+                    msg = db_agent_v1._progress_queue.get_nowait()
+                    progress_log.append(msg)
+
+                    if msg.startswith('✅'):
+                        status_placeholder.text(msg)
+                    elif msg.startswith('⚙️'):
+                        status_placeholder.text(msg)
+                    elif msg.startswith('🔧'):
+                        status_placeholder.text(msg)
+                    elif msg.startswith('⚠️'):
+                        status_placeholder.text(msg)
+                    elif msg.startswith('📣'):
+                        status_placeholder.text(msg)
                     else:
-                        progress_placeholder.text(message)
-            
-            # Show final response
-            with response_container:
-                response = result['llm_answer'].content
-                st.markdown(response)
-                
-                # Add assistant response to chat history
-                st.session_state.messages.append({"role": "assistant", "content": response})
-                
-        except Exception as e:
-            progress_container.empty()
-            error_msg = f"Sorry, I encountered an error: {str(e)}"
-            st.error(error_msg)
-            st.session_state.messages.append({"role": "assistant", "content": error_msg})
+                        status_placeholder.text(msg)
+
+                except queue.Empty:
+                    pass
+
+        # Final response
+        response_container.empty()
+        with response_container:
+            final_response = final_state["llm_answer"].content
+            st.markdown(final_response)
+            st.session_state.messages.append({"role": "assistant", "content": final_response})
+
+      except Exception as e:
+        error_msg = f"Sorry, I encountered an error: {str(e)}"
+        st.error(error_msg)
+        st.session_state.messages.append({"role": "assistant", "content": error_msg})

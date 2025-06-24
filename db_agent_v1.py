@@ -28,9 +28,34 @@ from langchain_core.documents import Document
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+import queue
 
-engine = create_engine('sqlite:///feedbacks_db.db')
-inspector = inspect(engine)
+# LAZY LOADING: Database connection
+_engine = None
+_db = None
+
+_progress_queue = queue.Queue()  # Global shared progress queue
+
+def set_progress_queue(q):
+    global _progress_queue
+    _progress_queue = q
+
+def get_progress_queue():
+    return _progress_queue
+
+def show_progress(message: str):
+    """Push a message to the Streamlit progress queue"""
+    _progress_queue.put(message)
+
+def get_database_connection():
+    """Get database connection, creating it if it doesn't exist"""
+    global _engine, _db
+    if _engine is None:
+        if not os.path.exists('feedbacks_db.db'):
+            raise FileNotFoundError("Database file 'feedbacks_db.db' not found. Make sure it's downloaded first.")
+        _engine = create_engine('sqlite:///feedbacks_db.db')
+        _db = SQLDatabase(_engine)
+    return _engine, _db
 
 load_dotenv(override=True)
 openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -77,17 +102,6 @@ def create_config(run_name: str, is_new_thread_id: bool = False, thread_id: str 
             }
 
     return config,thread_id
-
-def show_progress(message):
-    """Display progress message in Streamlit if available, otherwise print"""
-    try:
-        import streamlit as st
-        if hasattr(st, 'session_state') and 'progress_messages' in st.session_state:
-            st.session_state.progress_messages.append(message)
-        else:
-            print(message)
-    except:
-        print(message)
 
 vector_store = None
 
@@ -407,6 +421,7 @@ def create_sql_query_or_queries(state:State):
   chain = prompt | llm.with_structured_output(OutputAsAQuery)
 
   result = chain.invoke({'objects_documentation':state['objects_documentation'], 'analytical_intent': state['analytical_intent'],'sql_dialect':state['sql_dialect']})
+  show_progress(f"✅ SQL queries created:{len(result['query'])}")
   for q in result['query']:
    state['current_sql_queries'].append( {'query': q,
                                      'explanation': '', ## add it later
@@ -415,7 +430,7 @@ def create_sql_query_or_queries(state:State):
                                      'metadata':'' ## add it later
                                       } )
   
-  show_progress(f"✅ SQL queries created:{len(state['current_sql_queries'])}")
+  
   
   # control flow
   action = AgentAction(tool='create_sql_query_or_queries', tool_input='',log='tool ran successfully')
@@ -633,12 +648,11 @@ def correct_syntax_sql_query(sql_query: str, error:str, objects_documentation: s
  sql_query = result['query']
  return sql_query
 
-db = SQLDatabase(engine)
-
 def execute_sql_query(state:State):
   """ executes the sql query and retrieve the result """
   
   show_progress("⚙️ Analysing results...")
+  _, db = get_database_connection()
   for query_index, q in enumerate(state['current_sql_queries']):
      
     if state['current_sql_queries'][query_index]['result'] == '':    
@@ -676,7 +690,6 @@ def execute_sql_query(state:State):
 
        # if there is no more room for sql query iterations and the result still exceeds context window, throw a message
     else:
-        print(f"⚠️ Query result too large after 3 refinements.")
         state['current_sql_queries'][query_index]['result'] = 'Query result too large after 3 refinements.'
         state['current_sql_queries'][query_index]['explanation'] = "Refinement failed."
       
