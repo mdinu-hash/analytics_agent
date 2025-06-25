@@ -89,21 +89,26 @@ if "thread_id" not in st.session_state:
 
 #### UI
 
-st.set_page_config(page_title="DB Agent Demo", page_icon="🤖", layout="wide")
-st.title("🤖 Database Query Agent Demo")
-st.markdown("Ask questions about the feedback database and get insights!")
-st.text("Placeholder for some more info")
+st.set_page_config(page_title="GenAI Data Copilot", page_icon="🤖", layout="wide")
+st.title("GenAI Data Copilot - Demo")
+st.header("Instant Database Insights Through Natural Language")
+st.text("""Simply ask questions in plain English and get instant, data-driven answers based on enterprise, tabular data:
+- Root cause analysis ("Why did the ratings for adidas decreased in early 2016 from january to may?")
+- Key drivers ("which companies contributed to the increase in ratings from September 2022?") 
+- Time-based trends ("how these ratings changed over time per company?").
+- Comparative analysis ("Are premium-priced products (top 25% by price) getting better ratings than budget products?") 
+""")
+st.markdown("---")
 
 # Sidebar with database info
 with st.sidebar:
-    st.title("🤖 Database Query Agent Demo")
-    st.header("Database Info")
+    st.title("GenAI Data Copilot")
+    st.header("Data Model")
     st.text("This is a demo database based on public amazon reviews")
     st.markdown("""
-    - 413k feedback records (2002-2023)
-    - 8,145 products
-    - 12 companies (Apple, Samsung, Sony, Nike, etc.)
-    - Ratings from 1-5 stars
+    - Table feedback: 413k feedback records (2002-2023). Ratings from 1-5 stars.
+    - Table products: 8,145 products
+    - Table company: 12 companies (Apple, Samsung, Sony, Nike, etc.)
     """)
     
     # Show database status
