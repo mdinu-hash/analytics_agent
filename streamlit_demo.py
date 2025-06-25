@@ -23,7 +23,6 @@ def download_database():
         return True
     
     try:
-        st.info("🔄 Setting up database... This will take a moment (133MB download)")
         
         # Create progress bar
         progress_bar = st.progress(0)
@@ -48,7 +47,6 @@ def download_database():
         
         progress_bar.empty()
         status_text.empty()
-        st.success("✅ Database ready!")
         
         return True
         
