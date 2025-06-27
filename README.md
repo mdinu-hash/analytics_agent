@@ -4,8 +4,6 @@ Instant Insights Through Natural Language
 
 [Try The Live Demo: https://genai-data-copilot-1.streamlit.app/]
 
-[View LangSmith Traces - What Happens Under The Hood: https://smith.langchain.com/o/a016dac4-a501-45c3-b12f-e746a3b726f9/projects/p/703518c1-2cd1-44fa-8d4e-1e24f2370e49?timeModel=%7B%22duration%22%3A%221h%22%7D)
-
 Tired of waiting weeks for data insights? GenAI Data Copilot turns natural language into powerful database queries — delivering business answers in seconds.
 
 ## Why Use This Copilot?
@@ -68,9 +66,7 @@ The demo runs on a simplified Amazon reviews dataset with 3 tables:
 
 For every user prompt, the agent executes a series of intelligent steps, where each step builds on the previous one. By the end of the flow, the agent has enough knowledge to provide data-driven answers.
 
-[See a real trace of the prompt-to-answer via LangSmith](https://smith.langchain.com/o/a016dac4-a501-45c3-b12f-e746a3b726f9/projects/p/703518c1-2cd1-44fa-8d4e-1e24f2370e49?timeModel=%7B%22duration%22%3A%221h%22%7D)
-
-### The 4-Step Process
+### 4-Step Process
 
 Step 1: Extract Analytical Intent
 Behaves like a business analyst, translating user questions from natural language into technical requirements.
