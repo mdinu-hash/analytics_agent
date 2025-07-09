@@ -66,6 +66,9 @@ The demo runs on a simplified Amazon reviews dataset with 3 tables:
 
 For every user prompt, the agent executes a series of intelligent steps, where each step builds on the previous one. By the end of the flow, the agent has enough knowledge to provide data-driven answers.
 
+See workflow diagram: 
+https://drive.google.com/file/d/1q643lXnQqj8T9dk--sZri9zLTwVHSWTm/view?usp=sharing
+
 ### 4-Step Process
 
 Step 1: Extract Analytical Intent
