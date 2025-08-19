@@ -603,11 +603,7 @@ def create_queries_metadata(sql_queries: list[dict]):
   all_filters.extend(metadata["filters"])
 
   # include the default min/max feedback filters if feedback table has been used and was not filtered at all
-  if 'feedback' in all_tables and not any('feedback_date' in item for item in all_filters):
-     all_filters.append('feedback_date between 11/18/2002 and 09/12/2023')
-     output = format_sql_metadata_explanation(filters = all_filters,header='')
-  # include just the filters if there are any
-  elif all_filters:    
+  if all_filters:    
      output = format_sql_metadata_explanation(filters = all_filters,header='')
   # if no filters were applied, don't include other metadata for the sake of keeping the message simple
   else:
