@@ -74,7 +74,10 @@ def get_database_connection():
     
     return _engine, _db
 
-load_dotenv(override=True)
+# Load environment variables from root directory
+current_dir = Path(__file__).parent
+root_env_path = current_dir.parent.parent / '.env'
+load_dotenv(root_env_path, override=True)
 openai_api_key = os.getenv('OPENAI_API_KEY')
 LANGSMITH_API_KEY = os.getenv('LANGSMITH_API_KEY')
 os.environ['OPENAI_API_KEY'] = openai_api_key
