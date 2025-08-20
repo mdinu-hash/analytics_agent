@@ -8,6 +8,11 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage, AIMessage
 import threading
 import queue
+import sys
+
+# Add the current directory to Python path to ensure imports work
+current_dir = Path(__file__).parent
+sys.path.insert(0, str(current_dir))
 
 # Configuration
 GITHUB_REPO = "mdinu-hash/db_agent_v1"  
@@ -19,11 +24,19 @@ DOWNLOAD_URL = f"https://github.com/{GITHUB_REPO}/releases/download/{RELEASE_TAG
 def download_database():
     """Download database from GitHub releases if it doesn't exist"""
     
-    if os.path.exists(DATABASE_FILE):
-        return True
+    # Check if database exists in current directory or parent directories
+    db_paths = [
+        DATABASE_FILE,  # Current directory
+        str(current_dir / DATABASE_FILE),  # Same directory as this script
+        str(current_dir.parent / DATABASE_FILE),  # Parent directory
+        str(current_dir.parent.parent / DATABASE_FILE),  # Root directory
+    ]
+    
+    for db_path in db_paths:
+        if os.path.exists(db_path):
+            return db_path
     
     try:
-        
         # Create progress bar
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -35,7 +48,9 @@ def download_database():
         total_size = int(response.headers.get('content-length', 0))
         downloaded = 0
         
-        with open(DATABASE_FILE, 'wb') as f:
+        # Save to the same directory as this script
+        target_path = str(current_dir / DATABASE_FILE)
+        with open(target_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks
                 if chunk:
                     f.write(chunk)
@@ -48,15 +63,16 @@ def download_database():
         progress_bar.empty()
         status_text.empty()
         
-        return True
+        return target_path
         
     except Exception as e:
         st.error(f"❌ Failed to download database: {e}")
         st.info("Please check if the GitHub release URL is correct.")
-        return False
+        return None
 
 # Download database first
-if not download_database():
+database_path = download_database()
+if not database_path:
     st.stop()
 
 # Try to import agent components safely
@@ -110,9 +126,10 @@ with st.sidebar:
     """)
     
     # Show database status
-    if os.path.exists(DATABASE_FILE):
-        file_size = os.path.getsize(DATABASE_FILE) / (1024*1024)
+    if os.path.exists(database_path):
+        file_size = os.path.getsize(database_path) / (1024*1024)
         st.sidebar.markdown(f"**Status:** ✅ Database Connected")
+        st.sidebar.markdown(f"**Database:** {os.path.basename(database_path)} ({file_size:.1f} MB)")
     else:
         st.sidebar.markdown("**Status:** ❌ Database Not Available")
 
@@ -182,9 +199,9 @@ if prompt := st.chat_input("Ask about the database..."):
             final_state = output  # Keep most recent full state
 
             # Check for progress message from db_agent_v1.show_progress()
-            while not db_agent_v1._progress_queue.empty():
+            while not progress_queue.empty():
                 try:
-                    msg = db_agent_v1._progress_queue.get_nowait()
+                    msg = progress_queue.get_nowait()
                     progress_log.append(msg)
 
                     if msg.startswith('✅'):

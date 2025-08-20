@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, inspect
 import uuid
 import langchain, langgraph, langchain_openai, langsmith
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from langchain_core.runnables import RunnableConfig
 from langchain.callbacks.tracers.langchain import LangChainTracer
@@ -51,10 +52,26 @@ def get_database_connection():
     """Get database connection, creating it if it doesn't exist"""
     global _engine, _db
     if _engine is None:
-        if not os.path.exists('feedbacks_db.db'):
-            raise FileNotFoundError("Database file 'feedbacks_db.db' not found. Make sure it's downloaded first.")
-        _engine = create_engine('sqlite:///feedbacks_db.db')
-        _db = SQLDatabase(_engine)
+        # Check multiple possible database locations
+        current_dir = Path(__file__).parent
+        db_paths = [
+            'feedbacks_db.db',  # Current working directory
+            str(current_dir / 'feedbacks_db.db'),  # Same directory as this script
+            str(current_dir.parent / 'feedbacks_db.db'),  # Parent directory
+            str(current_dir.parent.parent / 'feedbacks_db.db'),  # Root directory
+        ]
+        
+        db_found = False
+        for db_path in db_paths:
+            if os.path.exists(db_path):
+                _engine = create_engine(f'sqlite:///{db_path}')
+                _db = SQLDatabase(_engine)
+                db_found = True
+                break
+        
+        if not db_found:
+            raise FileNotFoundError("Database file 'feedbacks_db.db' not found in any expected location. Make sure it's downloaded first.")
+    
     return _engine, _db
 
 load_dotenv(override=True)
