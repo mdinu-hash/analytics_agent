@@ -27,26 +27,26 @@ class TierFeeDataGenerator:
         # Tier fee structure from schema (in basis points converted to decimal)
         self.tier_fees_by_business_line = {
             'Managed Portfolio': [
-                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_pct': 0.90},        # 90 bps
-                {'tier_min_aum': 1000000, 'tier_max_aum': 5000000, 'tier_fee_pct': 0.75},  # 75 bps
-                {'tier_min_aum': 5000000, 'tier_max_aum': 999999999999, 'tier_fee_pct': 0.55}  # 55 bps
+                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_pct': 1},        # 1%
+                {'tier_min_aum': 1000000, 'tier_max_aum': 5000000, 'tier_fee_pct': 1},   # 1%
+                {'tier_min_aum': 5000000, 'tier_max_aum': 999999999999, 'tier_fee_pct': 1}  # 1%
             ],
             'Separately Managed Account': [
-                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_pct': 1.10},        # 110 bps
-                {'tier_min_aum': 1000000, 'tier_max_aum': 5000000, 'tier_fee_pct': 0.90},  # 90 bps
-                {'tier_min_aum': 5000000, 'tier_max_aum': 999999999999, 'tier_fee_pct': 0.70}  # 70 bps
+                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_pct': 1},        # 1%
+                {'tier_min_aum': 1000000, 'tier_max_aum': 5000000, 'tier_fee_pct': 1},   # 1%
+                {'tier_min_aum': 5000000, 'tier_max_aum': 999999999999, 'tier_fee_pct': 1}  # 1%
             ],
             'Mutual Fund Wrap': [
-                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_pct': 0.75},        # 75 bps
-                {'tier_min_aum': 1000000, 'tier_max_aum': 5000000, 'tier_fee_pct': 0.60},  # 60 bps
-                {'tier_min_aum': 5000000, 'tier_max_aum': 999999999999, 'tier_fee_pct': 0.45}  # 45 bps
+                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_pct': 1},        # 1%
+                {'tier_min_aum': 1000000, 'tier_max_aum': 5000000, 'tier_fee_pct': 1},   # 1%
+                {'tier_min_aum': 5000000, 'tier_max_aum': 999999999999, 'tier_fee_pct': 1}  # 1%
             ],
             'Annuity': [
-                {'tier_min_aum': 0, 'tier_max_aum': 999999999999, 'tier_fee_pct': 0.25}   # 25 bps
+                {'tier_min_aum': 0, 'tier_max_aum': 999999999999, 'tier_fee_pct': 1}   # 1%
             ],
             'Cash': [
-                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_pct': 0.10},        # 10 bps
-                {'tier_min_aum': 1000000, 'tier_max_aum': 999999999999, 'tier_fee_pct': 0.05}  # 5 bps
+                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_pct': 1},        # 1%
+                {'tier_min_aum': 1000000, 'tier_max_aum': 999999999999, 'tier_fee_pct': 1}  # 1%
             ]
         }
         
@@ -121,7 +121,7 @@ class TierFeeDataGenerator:
             business_line_key INTEGER NOT NULL,
             tier_min_aum DECIMAL(15,2) NOT NULL,
             tier_max_aum DECIMAL(15,2) NOT NULL,
-            tier_fee_pct DECIMAL(5,4) NOT NULL,
+            tier_fee_pct INTEGER NOT NULL,
             FOREIGN KEY (business_line_key) REFERENCES business_line(business_line_key),
             CONSTRAINT check_tier_range CHECK (tier_min_aum <= tier_max_aum),
             CONSTRAINT check_fee_positive CHECK (tier_fee_pct >= 0)
@@ -212,7 +212,7 @@ class TierFeeDataGenerator:
                             if result:
                                 fee_pct = result[0]
                                 annual_fee = amount * (fee_pct / 100)
-                                print(f"  ${amount:,.0f} AUM → {fee_pct:.2f}% fee = ${annual_fee:,.0f} annual")
+                                print(f"  ${amount:,.0f} AUM → {fee_pct}% fee = ${annual_fee:,.0f} annual")
                             else:
                                 print(f"  ${amount:,.0f} AUM → No fee tier found")
                     
@@ -295,7 +295,7 @@ class TierFeeDataGenerator:
                                     print(f"\n  {bl_name}:")
                                     current_bl = bl_name
                                 min_display = f"${min_aum:,.0f}" if min_aum > 0 else "$0"
-                                print(f"    {min_display} - {max_display}: {fee_pct:.2f}% ({fee_pct*100:.0f} bps)")
+                                print(f"    {min_display} - {max_display}: {fee_pct}%")
                         elif not results:
                             print("  No issues found ✓")
                         else:

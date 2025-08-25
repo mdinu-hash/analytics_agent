@@ -103,7 +103,7 @@ class FactRevenueMonthlyGenerator:
                             business_line_key,
                             tier_min_aum,
                             tier_max_aum,
-                            tier_fee
+                            tier_fee_pct
                         FROM tier_fee
                         ORDER BY business_line_key, tier_min_aum
                     """)
@@ -193,11 +193,11 @@ class FactRevenueMonthlyGenerator:
         # Find appropriate tier for this account's assets
         for tier in tier_fees[business_line_key]:
             if tier['tier_min_aum'] <= account_assets < tier['tier_max_aum']:
-                return tier['tier_fee'] / 10000  # Convert basis points to decimal (e.g., 90 bps = 0.009)
+                return tier['tier_fee'] / 100  # Convert percentage to decimal (e.g., 1% = 0.01)
         
         # If no tier found, use the highest tier (should be the last one)
         highest_tier = tier_fees[business_line_key][-1]
-        return highest_tier['tier_fee'] / 10000
+        return highest_tier['tier_fee'] / 100
     
     def generate_revenue_monthly_data(self) -> List[Dict[str, Any]]:
         """Generate revenue monthly data based on fact_account_monthly and fee structures."""

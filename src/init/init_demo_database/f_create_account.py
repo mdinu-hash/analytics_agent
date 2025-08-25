@@ -28,7 +28,7 @@ class AccountDataGenerator:
         
         # Constants from schema
         self.current_date = date(2025, 9, 30)
-        self.target_account_count = 72000
+        self.target_account_count = 800  # 50 advisors * 16 median = 800 accounts
         
         # Distribution configurations
         self.business_line_dist = {
@@ -62,10 +62,10 @@ class AccountDataGenerator:
         
         self.risk_profiles = ['Conservative', 'Moderate', 'Aggressive']
         
-        # Account distribution per advisor: min 15, median 145, max 400
-        self.min_accounts_per_advisor = 15
-        self.median_accounts_per_advisor = 145
-        self.max_accounts_per_advisor = 400
+        # Account distribution per advisor: min 2, median 16, max 40
+        self.min_accounts_per_advisor = 2
+        self.median_accounts_per_advisor = 16
+        self.max_accounts_per_advisor = 40
         
     def _parse_connection_string(self, connection_string: str) -> dict:
         """Parse PostgreSQL connection string into connection parameters."""
@@ -139,16 +139,16 @@ class AccountDataGenerator:
                 accounts_per_advisor[advisor_idx] = remaining_accounts
             else:
                 # Generate number of accounts for this advisor
-                # Use a skewed distribution to approximate median = 145
+                # Use a skewed distribution to approximate median = 16
                 if remaining_accounts <= self.min_accounts_per_advisor:
                     accounts = remaining_accounts
                 else:
-                    # Generate using log-normal distribution approximating median = 145
+                    # Generate using log-normal distribution approximating median = 16
                     mean_accounts = min(self.median_accounts_per_advisor, 
                                       remaining_accounts // (len(advisor_keys) - i))
                     
                     # Add some randomness while respecting constraints
-                    variance = min(50, mean_accounts // 3)
+                    variance = min(8, mean_accounts // 3)  # Reduced variance for smaller scale
                     accounts = max(self.min_accounts_per_advisor,
                                  min(self.max_accounts_per_advisor,
                                      int(np.random.normal(mean_accounts, variance))))

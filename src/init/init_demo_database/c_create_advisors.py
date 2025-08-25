@@ -28,7 +28,7 @@ class AdvisorDataGenerator:
         
         # Constants from schema
         self.current_date = date(2025, 9, 30)
-        self.target_advisor_count = 500
+        self.target_advisor_count = 50
         
         # Firm name generation patterns
         self.firm_prefixes = [
@@ -116,8 +116,9 @@ class AdvisorDataGenerator:
         """Generate advisor data according to schema specifications."""
         print(f"Generating {self.target_advisor_count} advisors...")
         
-        advisors = []
-        advisor_key = 1
+        # Phase 1: Generate initial advisor records (all active)
+        initial_advisors = []
+        advisors_to_terminate = []
         
         for advisor_id in range(1, self.target_advisor_count + 1):
             if advisor_id % 100 == 0:
@@ -131,66 +132,69 @@ class AdvisorDataGenerator:
             practice_segment = self._weighted_choice(self.practice_segment_dist)
             from_date = self._generate_from_date(tenure)
             
-            # Determine if this advisor will be terminated recently
-            will_terminate = self._should_terminate_recently()
+            # Create initial record (all start as active with far future end date)
+            advisor = {
+                'advisor_id': advisor_id,
+                'advisor_tenure': tenure,
+                'firm_name': firm_name,
+                'firm_affiliation_model': affiliation_model,
+                'advisor_role': advisor_role,
+                'advisor_status': 'Active',
+                'practice_segment': practice_segment,
+                'from_date': from_date,
+                'to_date': date(9999, 12, 31)
+            }
             
-            if will_terminate:
-                # Create initial active record
-                active_advisor = {
-                    'advisor_key': advisor_key,
-                    'advisor_id': advisor_id,
-                    'advisor_tenure': tenure,
-                    'firm_name': firm_name,
-                    'firm_affiliation_model': affiliation_model,
-                    'advisor_role': advisor_role,
-                    'advisor_status': 'Active',
-                    'practice_segment': practice_segment,
-                    'from_date': from_date,
-                    'to_date': None  # Will be set to termination date
-                }
-                
-                # Generate termination date and create terminated record
+            initial_advisors.append(advisor)
+            
+            # Determine if this advisor should be terminated
+            if self._should_terminate_recently():
+                advisors_to_terminate.append(advisor_id)
+        
+        # Phase 2: Process terminations and create SCD2 records
+        print(f"Processing {len(advisors_to_terminate)} advisor terminations...")
+        final_advisors = []
+        advisor_key = 1
+        
+        for advisor in initial_advisors:
+            advisor_id = advisor['advisor_id']
+            
+            if advisor_id in advisors_to_terminate:
+                # Create SCD2 records for terminated advisor
                 termination_date = self._generate_termination_date()
-                active_advisor['to_date'] = termination_date
                 
-                terminated_advisor = active_advisor.copy()
-                terminated_advisor['advisor_key'] = advisor_key + 1
-                terminated_advisor['advisor_status'] = 'Terminated'
-                terminated_advisor['from_date'] = termination_date
-                terminated_advisor['to_date'] = date(9999, 12, 31)
+                # Active record (ends on termination date)
+                active_record = advisor.copy()
+                active_record['advisor_key'] = advisor_key
+                active_record['to_date'] = termination_date
+                final_advisors.append(active_record)
                 
-                advisors.extend([active_advisor, terminated_advisor])
+                # Terminated record (starts day after termination)
+                terminated_record = advisor.copy()
+                terminated_record['advisor_key'] = advisor_key + 1
+                terminated_record['advisor_status'] = 'Terminated'
+                terminated_record['from_date'] = termination_date + timedelta(days=1)
+                terminated_record['to_date'] = date(9999, 12, 31)
+                final_advisors.append(terminated_record)
+                
                 advisor_key += 2
             else:
-                # Create only one record (active or terminated)
+                # Single record advisor (active or old termination)
                 status = self._weighted_choice(self.status_dist)
+                advisor['advisor_key'] = advisor_key
+                advisor['advisor_status'] = status
                 
                 if status == 'Terminated':
-                    # For older terminations, create a terminated record with earlier date
+                    # For older terminations, set termination date
                     termination_date = self._generate_termination_date()
-                    to_date = termination_date
-                    from_date = min(from_date, termination_date - timedelta(days=365))  # At least 1 year before termination
-                else:
-                    to_date = date(9999, 12, 31)
+                    advisor['to_date'] = termination_date
+                    advisor['from_date'] = min(advisor['from_date'], termination_date - timedelta(days=365))
                 
-                advisor = {
-                    'advisor_key': advisor_key,
-                    'advisor_id': advisor_id,
-                    'advisor_tenure': tenure,
-                    'firm_name': firm_name,
-                    'firm_affiliation_model': affiliation_model,
-                    'advisor_role': advisor_role,
-                    'advisor_status': status,
-                    'practice_segment': practice_segment,
-                    'from_date': from_date,
-                    'to_date': to_date
-                }
-                
-                advisors.append(advisor)
+                final_advisors.append(advisor)
                 advisor_key += 1
         
-        print(f"Generated {len(advisors)} advisor records (including SCD2 history)")
-        return advisors
+        print(f"Generated {len(final_advisors)} advisor records (including SCD2 history)")
+        return final_advisors
     
     def create_table_if_not_exists(self):
         """Create advisors table if it doesn't exist."""

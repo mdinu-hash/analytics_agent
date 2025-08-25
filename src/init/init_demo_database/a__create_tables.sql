@@ -1,5 +1,6 @@
 
 -- Date dimension table
+DROP TABLE IF EXISTS date CASCADE;
 CREATE TABLE date (
     calendar_day DATE PRIMARY KEY,
     month_name TEXT NOT NULL,
@@ -16,6 +17,7 @@ CREATE TABLE date (
 );
 
 -- Business line lookup table
+DROP TABLE IF EXISTS business_line CASCADE;
 CREATE TABLE business_line (
     business_line_key SERIAL PRIMARY KEY,
     business_line_name TEXT NOT NULL CHECK (business_line_name IN (
@@ -28,6 +30,7 @@ CREATE TABLE business_line (
 );
 
 -- Advisors table (SCD Type 2)
+DROP TABLE IF EXISTS advisors CASCADE;
 CREATE TABLE advisors (
     advisor_key SERIAL PRIMARY KEY,
     advisor_id INTEGER NOT NULL,
@@ -50,6 +53,7 @@ CREATE TABLE advisors (
 );
 
 -- Households table (SCD Type 2)
+DROP TABLE IF EXISTS household CASCADE;
 CREATE TABLE household (
     household_key SERIAL PRIMARY KEY,
     household_id INTEGER NOT NULL,
@@ -69,6 +73,7 @@ CREATE TABLE household (
 );
 
 -- Accounts table (SCD Type 2)
+DROP TABLE IF EXISTS account CASCADE;
 CREATE TABLE account (
     account_key SERIAL PRIMARY KEY,
     account_id INTEGER NOT NULL,
@@ -98,6 +103,7 @@ CREATE TABLE account (
 );
 
 -- Product table
+DROP TABLE IF EXISTS product CASCADE;
 CREATE TABLE product (
     product_id SERIAL PRIMARY KEY,
     asset_category TEXT NOT NULL CHECK (asset_category IN (
@@ -117,6 +123,7 @@ CREATE TABLE product (
 );
 
 -- Tier fee structure table
+DROP TABLE IF EXISTS tier_fee CASCADE;
 CREATE TABLE tier_fee (
     tier_fee_id SERIAL PRIMARY KEY,
     business_line_key INTEGER NOT NULL REFERENCES business_line(business_line_key),
@@ -126,6 +133,7 @@ CREATE TABLE tier_fee (
 );
 
 -- Advisor payout rates table
+DROP TABLE IF EXISTS advisor_payout_rate CASCADE;
 CREATE TABLE advisor_payout_rate (
     firm_affiliation_model TEXT PRIMARY KEY CHECK (firm_affiliation_model IN (
         'RIA', 'Hybrid RIA', 'Broker-Dealer W-2', 'Independent BD', 
@@ -135,12 +143,14 @@ CREATE TABLE advisor_payout_rate (
 );
 
 -- Fact table: Initial account assets
+DROP TABLE IF EXISTS fact_account_initial_assets CASCADE;
 CREATE TABLE fact_account_initial_assets (
     account_key INTEGER PRIMARY KEY REFERENCES account(account_key),
     account_initial_assets DECIMAL(15,2) NOT NULL CHECK (account_initial_assets > 0)
 );
 
 -- Fact table: Monthly account data
+DROP TABLE IF EXISTS fact_account_monthly CASCADE;
 CREATE TABLE fact_account_monthly (
     snapshot_date DATE NOT NULL,
     account_key INTEGER NOT NULL REFERENCES account(account_key),
@@ -156,6 +166,7 @@ CREATE TABLE fact_account_monthly (
 );
 
 -- Fact table: Account product allocations monthly
+DROP TABLE IF EXISTS fact_account_product_monthly CASCADE;
 CREATE TABLE fact_account_product_monthly (
     snapshot_date DATE NOT NULL,
     account_key INTEGER NOT NULL REFERENCES account(account_key),
@@ -166,6 +177,7 @@ CREATE TABLE fact_account_product_monthly (
 );
 
 -- Fact table: Monthly household aggregations
+DROP TABLE IF EXISTS fact_household_monthly CASCADE;
 CREATE TABLE fact_household_monthly (
     snapshot_date DATE NOT NULL,
     household_key INTEGER NOT NULL REFERENCES household(household_key),
@@ -181,6 +193,7 @@ CREATE TABLE fact_household_monthly (
 );
 
 -- Fact table: Monthly revenue calculations
+DROP TABLE IF EXISTS fact_revenue_monthly CASCADE;
 CREATE TABLE fact_revenue_monthly (
     snapshot_date DATE NOT NULL,
     account_key INTEGER NOT NULL REFERENCES account(account_key),
@@ -199,6 +212,7 @@ CREATE TABLE fact_revenue_monthly (
 );
 
 -- Transactions table (high volume)
+DROP TABLE IF EXISTS transactions CASCADE;
 CREATE TABLE transactions (
     transaction_id BIGSERIAL PRIMARY KEY,
     advisor_key INTEGER NOT NULL REFERENCES advisors(advisor_key),
@@ -214,6 +228,7 @@ CREATE TABLE transactions (
 );
 
 -- Customer feedback fact table
+DROP TABLE IF EXISTS fact_customer_feedback CASCADE;
 CREATE TABLE fact_customer_feedback (
     feedback_id SERIAL PRIMARY KEY,
     feedback_date DATE NOT NULL,

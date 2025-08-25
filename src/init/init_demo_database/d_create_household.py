@@ -29,7 +29,7 @@ class HouseholdDataGenerator:
         # Constants from schema
         self.current_date = date(2025, 9, 30)
         self.snapshot_start_date = date(2024, 9, 30)
-        self.target_household_count = 45000
+        self.target_household_count = 5000
         
         # Distribution configurations
         self.registration_type_dist = {
@@ -111,27 +111,75 @@ class HouseholdDataGenerator:
         """Generate household data according to schema specifications."""
         print(f"Generating {self.target_household_count} households...")
         
+        # Cache advisor IDs once
         advisor_ids = self._get_advisor_ids()
-        households = []
-        household_key = 1
+        print(f"Using {len(advisor_ids)} advisor IDs for household generation")
         
-        for household_id in range(1, self.target_household_count + 1):
+        # Pre-generate all random values in batches for MAXIMUM performance
+        import numpy as np
+        from datetime import timedelta, date
+        
+        print("Pre-generating all random values...")
+        
+        # Generate ALL random values at once (no loops!)
+        tenures = np.random.randint(1, 41, self.target_household_count)
+        advisor_assignments = np.random.choice(advisor_ids, self.target_household_count)
+        termination_flags = np.random.random(self.target_household_count) < 0.12
+        
+        # Pre-generate weighted choices
+        reg_types = list(self.registration_type_dist.keys())
+        reg_weights = list(self.registration_type_dist.values())
+        seg_types = list(self.segment_dist.keys())
+        seg_weights = list(self.segment_dist.values())
+        status_types = list(self.status_dist.keys())
+        status_weights = list(self.status_dist.values())
+        
+        registration_types = np.random.choice(reg_types, self.target_household_count, p=reg_weights)
+        segments = np.random.choice(seg_types, self.target_household_count, p=seg_weights)
+        
+        # Pre-generate ALL dates at once (major bottleneck elimination)
+        variance_days = np.random.randint(-180, 181, self.target_household_count)
+        termination_days = np.random.randint(0, 91, self.target_household_count)
+        
+        # Calculate base dates vectorized
+        current_date_ordinal = self.current_date.toordinal()
+        base_dates = current_date_ordinal - (tenures * 365)
+        registration_dates = [date.fromordinal(int(bd + vd)) for bd, vd in zip(base_dates, variance_days)]
+        
+        # Pre-calculate termination dates
+        three_months_ago_ordinal = (self.current_date - timedelta(days=90)).toordinal()
+        termination_dates = [date.fromordinal(three_months_ago_ordinal + td) for td in termination_days]
+        
+        # Pre-generate status choices for non-terminated households
+        non_terminated_statuses = np.random.choice(status_types, self.target_household_count, p=status_weights)
+        
+        print("Pre-generation complete. Creating household records...")
+        
+        # Vectorized record creation
+        final_households = []
+        household_key = 1
+        far_future = date(9999, 12, 31)
+        
+        for i in range(self.target_household_count):
+            household_id = i + 1
+            
             if household_id % 5000 == 0:
                 print(f"Generated {household_id} households...")
             
-            # Generate basic household attributes
-            tenure = self._generate_household_tenure()
-            registration_date = self._generate_registration_date(tenure)
-            registration_type = self._weighted_choice(self.registration_type_dist)
-            segment = self._weighted_choice(self.segment_dist)
-            advisor_id = random.choice(advisor_ids)
-            
-            # Determine if this household will be terminated recently
-            will_terminate = self._should_terminate_recently()
+            # All values are pre-calculated
+            tenure = int(tenures[i])
+            advisor_id = int(advisor_assignments[i])
+            registration_type = registration_types[i]
+            segment = segments[i]
+            will_terminate = termination_flags[i]
+            registration_date = registration_dates[i]
             
             if will_terminate:
-                # Create initial active record
-                active_household = {
+                # Create SCD2 records for terminated household
+                termination_date = termination_dates[i]
+                
+                # Active record (ends on termination date)
+                final_households.append({
                     'household_key': household_key,
                     'household_id': household_id,
                     'household_tenure': tenure,
@@ -141,27 +189,37 @@ class HouseholdDataGenerator:
                     'household_status': 'Active',
                     'household_advisor_id': advisor_id,
                     'from_date': registration_date,
-                    'to_date': None  # Will be set to termination date
-                }
+                    'to_date': termination_date
+                })
                 
-                # Generate termination date and create terminated record
-                termination_date = self._generate_termination_date()
-                active_household['to_date'] = termination_date
+                # Terminated record (starts day after termination)
+                final_households.append({
+                    'household_key': household_key + 1,
+                    'household_id': household_id,
+                    'household_tenure': tenure,
+                    'household_registration_type': registration_type,
+                    'household_registration_date': registration_date,
+                    'household_segment': segment,
+                    'household_status': 'Terminated',
+                    'household_advisor_id': advisor_id,
+                    'from_date': termination_date + timedelta(days=1),
+                    'to_date': far_future
+                })
                 
-                terminated_household = active_household.copy()
-                terminated_household['household_key'] = household_key + 1
-                terminated_household['household_status'] = 'Terminated'
-                terminated_household['from_date'] = termination_date
-                terminated_household['to_date'] = date(9999, 12, 31)
-                
-                households.extend([active_household, terminated_household])
                 household_key += 2
             else:
-                # Create only active record
-                status = self._weighted_choice(self.status_dist)
-                to_date = date(9999, 12, 31) if status == 'Active' else self._generate_termination_date()
+                # Single record household (active or old termination)
+                status = non_terminated_statuses[i]
+                to_date = far_future
+                from_date = registration_date
                 
-                household = {
+                if status == 'Terminated':
+                    # For older terminations, set termination date
+                    termination_date = termination_dates[i]
+                    to_date = termination_date
+                    from_date = min(registration_date, termination_date - timedelta(days=365))
+                
+                final_households.append({
                     'household_key': household_key,
                     'household_id': household_id,
                     'household_tenure': tenure,
@@ -170,15 +228,13 @@ class HouseholdDataGenerator:
                     'household_segment': segment,
                     'household_status': status,
                     'household_advisor_id': advisor_id,
-                    'from_date': registration_date,
+                    'from_date': from_date,
                     'to_date': to_date
-                }
-                
-                households.append(household)
+                })
                 household_key += 1
         
-        print(f"Generated {len(households)} household records (including SCD2 history)")
-        return households
+        print(f"Generated {len(final_households)} household records (including SCD2 history)")
+        return final_households
     
     def create_table_if_not_exists(self):
         """Create household table if it doesn't exist."""
