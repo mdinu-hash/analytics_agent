@@ -286,6 +286,10 @@ class FactCustomerFeedbackGenerator:
         print(f"Generated {len(feedback_data):,} customer feedback records")
         return feedback_data
     
+    def generate_fact_customer_feedback_data(self) -> List[Dict[str, Any]]:
+        """Alias for generate_customer_feedback_data() for compatibility with notebook."""
+        return self.generate_customer_feedback_data()
+    
     def create_table_if_not_exists(self):
         """Create fact_customer_feedback table if it doesn't exist."""
         create_table_sql = """
@@ -367,6 +371,10 @@ class FactCustomerFeedbackGenerator:
         except Exception as e:
             print(f"Error inserting customer feedback data: {e}")
             raise
+    
+    def insert_fact_customer_feedback_data(self, feedback_data: List[Dict[str, Any]], batch_size: int = 1000):
+        """Alias for insert_customer_feedback_data() for compatibility with notebook."""
+        return self.insert_customer_feedback_data(feedback_data, batch_size)
     
     def validate_data(self):
         """Validate the inserted data meets schema requirements."""
@@ -591,6 +599,9 @@ def main():
         print("Ensure you have run the prerequisite scripts:")
         print("- create_household.py")
         print("- create_advisors.py")
+
+# Alias for compatibility with notebook
+FactCustomerFeedbackDataGenerator = FactCustomerFeedbackGenerator
 
 if __name__ == "__main__":
     main()

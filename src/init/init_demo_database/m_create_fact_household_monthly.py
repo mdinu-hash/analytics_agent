@@ -126,6 +126,10 @@ class FactHouseholdMonthlyGenerator:
             print(f"Error generating household monthly data: {e}")
             raise
     
+    def generate_fact_household_monthly_data(self) -> List[Dict[str, Any]]:
+        """Alias for generate_household_monthly_data() for compatibility with notebook."""
+        return self.generate_household_monthly_data()
+    
     def create_table_if_not_exists(self):
         """Create fact_household_monthly table if it doesn't exist."""
         create_table_sql = """
@@ -209,6 +213,10 @@ class FactHouseholdMonthlyGenerator:
         except Exception as e:
             print(f"Error inserting household monthly data: {e}")
             raise
+    
+    def insert_fact_household_monthly_data(self, household_data: List[Dict[str, Any]], batch_size: int = 1000):
+        """Alias for insert_household_monthly_data() for compatibility with notebook."""
+        return self.insert_household_monthly_data(household_data, batch_size)
     
     def validate_data(self):
         """Validate the inserted data meets schema requirements."""
@@ -393,6 +401,9 @@ def main():
         print(f"Error: {e}")
         print("Please check your database configuration and ensure PostgreSQL is running.")
         print("Ensure you have run create_fact_account_monthly.py first.")
+
+# Alias for compatibility with notebook
+FactHouseholdMonthlyDataGenerator = FactHouseholdMonthlyGenerator
 
 if __name__ == "__main__":
     main()

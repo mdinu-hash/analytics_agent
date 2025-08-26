@@ -270,6 +270,10 @@ class FactRevenueMonthlyGenerator:
         print(f"Generated {len(revenue_data)} revenue records")
         return revenue_data
     
+    def generate_fact_revenue_monthly_data(self) -> List[Dict[str, Any]]:
+        """Alias for generate_revenue_monthly_data() for compatibility with notebook."""
+        return self.generate_revenue_monthly_data()
+    
     def create_table_if_not_exists(self):
         """Create fact_revenue_monthly table if it doesn't exist."""
         create_table_sql = """
@@ -371,6 +375,10 @@ class FactRevenueMonthlyGenerator:
         except Exception as e:
             print(f"Error inserting revenue monthly data: {e}")
             raise
+    
+    def insert_fact_revenue_monthly_data(self, revenue_data: List[Dict[str, Any]], batch_size: int = 1000):
+        """Alias for insert_revenue_monthly_data() for compatibility with notebook."""
+        return self.insert_revenue_monthly_data(revenue_data, batch_size)
     
     def validate_data(self):
         """Validate the inserted data meets schema requirements."""
@@ -572,6 +580,9 @@ def main():
         print("- create_fact_account_monthly.py")
         print("- create_tier_fee.py (or create_business_line.py)")
         print("- create_advisor_payout_rate.py (or create_advisors.py)")
+
+# Alias for compatibility with notebook
+FactRevenueMonthlyDataGenerator = FactRevenueMonthlyGenerator
 
 if __name__ == "__main__":
     main()

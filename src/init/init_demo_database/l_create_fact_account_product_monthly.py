@@ -287,6 +287,10 @@ class FactAccountProductMonthlyGenerator:
         print(f"Generated {len(product_monthly_data)} product allocation records")
         return product_monthly_data
     
+    def generate_fact_account_product_monthly_data(self) -> List[Dict[str, Any]]:
+        """Alias for generate_product_monthly_data() for compatibility with notebook."""
+        return self.generate_product_monthly_data()
+    
     def create_table_if_not_exists(self):
         """Create fact_account_product_monthly table if it doesn't exist."""
         create_table_sql = """
@@ -361,6 +365,10 @@ class FactAccountProductMonthlyGenerator:
         except Exception as e:
             print(f"Error inserting product monthly data: {e}")
             raise
+    
+    def insert_fact_account_product_monthly_data(self, product_data: List[Dict[str, Any]], batch_size: int = 1000):
+        """Alias for insert_product_monthly_data() for compatibility with notebook."""
+        return self.insert_product_monthly_data(product_data, batch_size)
     
     def validate_data(self):
         """Validate the inserted data meets schema requirements."""
@@ -533,6 +541,9 @@ def main():
         print(f"Error: {e}")
         print("Please check your database configuration and ensure PostgreSQL is running.")
         print("Ensure you have run create_fact_account_monthly.py and create_product.py first.")
+
+# Alias for compatibility with notebook
+FactAccountProductMonthlyDataGenerator = FactAccountProductMonthlyGenerator
 
 if __name__ == "__main__":
     main()

@@ -170,6 +170,10 @@ class FactAccountInitialAssetsGenerator:
         print(f"Generated {len(initial_assets_data)} initial asset records")
         return initial_assets_data
     
+    def generate_fact_account_initial_assets_data(self) -> List[Dict[str, Any]]:
+        """Alias for generate_initial_assets_data() for compatibility with notebook."""
+        return self.generate_initial_assets_data()
+    
     def create_table_if_not_exists(self):
         """Create fact_account_initial_assets table if it doesn't exist."""
         create_table_sql = """
@@ -232,6 +236,10 @@ class FactAccountInitialAssetsGenerator:
         except Exception as e:
             print(f"Error inserting initial assets data: {e}")
             raise
+    
+    def insert_fact_account_initial_assets_data(self, initial_assets: List[Dict[str, Any]], batch_size: int = 1000):
+        """Alias for insert_initial_assets_data() for compatibility with notebook."""
+        return self.insert_initial_assets_data(initial_assets, batch_size)
     
     def validate_data(self):
         """Validate the inserted data meets schema requirements."""
@@ -387,6 +395,9 @@ def main():
         print(f"Error: {e}")
         print("Please check your database configuration and ensure PostgreSQL is running.")
         print("Ensure you have run create_account.py first to create account data.")
+
+# Alias for compatibility with notebook
+FactAccountInitialAssetsDataGenerator = FactAccountInitialAssetsGenerator
 
 if __name__ == "__main__":
     main()

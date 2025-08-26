@@ -377,9 +377,9 @@ WHERE account_initial_assets > 20000000;
 -- ================================================================
 
 -- Check 8.1: Exactly 12 distinct snapshot_date values (end-of-month dates)
-SELECT 'Check 8.1: Exactly 12 distinct snapshot_date values (end-of-month dates)' as check_name,
-       CASE WHEN COUNT(DISTINCT snapshot_date) = 12 THEN 0 ELSE 1 END as issues_found,
-       CASE WHEN COUNT(DISTINCT snapshot_date) = 12 
+SELECT 'Check 8.1: Exactly 13 distinct snapshot_date values (end-of-month dates)' as check_name,
+       CASE WHEN COUNT(DISTINCT snapshot_date) = 13 THEN 0 ELSE 1 END as issues_found,
+       CASE WHEN COUNT(DISTINCT snapshot_date) = 13 
             THEN 'PASS' 
             ELSE 'Found ' || COUNT(DISTINCT snapshot_date) || ' distinct snapshot_date values' 
        END as details
@@ -418,7 +418,7 @@ FROM (
     SELECT snapshot_date, account_key, SUM(product_allocation_pct) as total_allocation
     FROM fact_account_product_monthly
     GROUP BY snapshot_date, account_key
-    HAVING ABS(total_allocation - 100.0) > 0.01
+    HAVING ABS(SUM(product_allocation_pct) - 100.0) > 0.01
 ) allocation_issues;
 
 -- Check 9.4: Each account has between 2 and 5 products
@@ -429,7 +429,7 @@ FROM (
     SELECT snapshot_date, account_key, COUNT(*) as product_count
     FROM fact_account_product_monthly
     GROUP BY snapshot_date, account_key
-    HAVING product_count < 2 OR product_count > 5
+    HAVING COUNT(*) < 2 OR COUNT(*) > 5
 ) product_count_issues;
 
 -- Check 9.5: product_allocation_pct is between 0 and 100

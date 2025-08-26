@@ -92,6 +92,10 @@ class AdvisorPayoutRateDataGenerator:
         print(f"Generated {len(payout_rate_data)} payout rate records")
         return payout_rate_data
     
+    def generate_advisor_payout_rate_data(self) -> List[Dict[str, Any]]:
+        """Alias for generate_payout_rate_data() for compatibility with notebook."""
+        return self.generate_payout_rate_data()
+    
     def create_table_if_not_exists(self):
         """Create advisor_payout_rate table if it doesn't exist."""
         create_table_sql = """
@@ -148,6 +152,10 @@ class AdvisorPayoutRateDataGenerator:
         except Exception as e:
             print(f"Error inserting payout rate data: {e}")
             raise
+    
+    def insert_advisor_payout_rate_data(self, payout_rates: List[Dict[str, Any]]):
+        """Alias for insert_payout_rate_data() for compatibility with notebook."""
+        return self.insert_payout_rate_data(payout_rates)
     
     def test_payout_calculation(self, test_revenues: List[float] = None):
         """Test payout calculation logic with sample revenue amounts."""
