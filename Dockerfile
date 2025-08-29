@@ -9,10 +9,12 @@ ENV PYTHONPATH=/app
 ENV STREAMLIT_SERVER_PORT=8080
 ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
 
-# Install system dependencies
+# Install system dependencies including PostgreSQL dev headers
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
+    libpq-dev \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
