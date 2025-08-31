@@ -41,62 +41,103 @@ if "messages" not in st.session_state:
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid.uuid4())
 
-#### UI
+# Configure Streamlit page
+st.set_page_config(
+    page_title="Growth Analytics Agent", 
+    page_icon="🤖", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.set_page_config(page_title="GenAI Data Copilot v2", page_icon="🤖", layout="wide")
-st.title("GenAI Data Copilot v2 - PostgreSQL Demo")
-st.header("Instant Database Insights Through Natural Language")
-st.text("""Simply ask questions in plain English and get instant, data-driven answers based on enterprise, tabular data:
-- Root cause analysis ("Why did the ratings for adidas decreased in early 2016 from january to may?")
-- Key drivers ("which companies contributed to the increase in ratings from September 2022?") 
-- Time-based trends ("how these ratings changed over time per company?").
-- Comparative analysis ("Are premium-priced products (top 25% by price) getting better ratings than budget products?") 
-""")
-st.markdown("---")
-
-# Sidebar with database info
+# Sidebar for new chat and navigation
 with st.sidebar:
-    st.title("GenAI Data Copilot v2")
-    st.header("Data Model")
-    st.text("This is a demo database based on public amazon reviews (PostgreSQL)")
-    st.markdown("""
-    - Table feedback: 413k feedback records (2002-2023). Ratings from 1-5 stars.
-    - Table products: 8,145 products
-    - Table company: 12 companies (Apple, Samsung, Sony, Nike, etc.)
-    """)
+    st.header("Growth Analytics Agent")
     
-    # Show database connection status
-    try:
-        # Test database connection by getting the database manager
-        db_manager = db_agent_v2.get_database_manager()
-        st.sidebar.markdown(f"**Status:** ✅ PostgreSQL Connected")
-        st.sidebar.markdown(f"**Database:** Demo PostgreSQL Database")
-    except Exception as e:
-        st.sidebar.markdown("**Status:** ❌ Database Not Available")
-        st.sidebar.markdown(f"**Error:** {str(e)}")
-
-    # Clear chat button in sidebar
-    st.markdown("---")
-    if st.button("🗑️ Clear & Start New Chat", use_container_width=True, type="secondary"):
+    # New Chat button
+    if st.button("🆕 New Chat", use_container_width=True, type="primary"):
         st.session_state.messages = []
         st.session_state.thread_id = str(uuid.uuid4())
+        st.rerun()
+    
+    st.divider()
+    
+    # Database info
+    st.subheader("📊 Dataset Info")
+    st.info("**Amazon Reviews (2002-2023)**")
+    
+    with st.expander("📋 Data Details"):
+        st.write("• **413k** feedback records")
+        st.write("• **8,145** products") 
+        st.write("• **12** companies")
+        st.write("• Ratings: 1-5 stars")
+        st.write("• Companies: Apple, Samsung, Sony, Nike, Adidas, etc.")
+    
+    # Connection status
+    try:
+        db_manager = db_agent_v2.get_database_manager()
+        st.success("✅ Database Connected")
+    except Exception as e:
+        st.error("❌ Database Disconnected")
+
+# Main content area
+st.title("🔍 Ask anything about your data")
+
+# Show welcome screen with example prompts if no messages
+if not st.session_state.messages:
+    st.markdown("### 💡 Try these example questions:")
+    
+    # Create columns for example prompts
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔍 Root Cause Analysis", use_container_width=True):
+            prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.rerun()
+        st.caption("Why did adidas ratings decrease in early 2016?")
+        
+        if st.button("📊 Time Trends", use_container_width=True):
+            prompt = "how these ratings changed over time per company?"
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.rerun()
+        st.caption("How did ratings change over time per company?")
+    
+    with col2:
+        if st.button("📈 Key Drivers", use_container_width=True):
+            prompt = "which companies contributed to the increase in ratings from September 2022?"
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.rerun()
+        st.caption("Which companies drove rating improvements since 2022?")
+        
+        if st.button("⚖️ Comparative Analysis", use_container_width=True):
+            prompt = "Are premium-priced products getting better ratings than budget products?"
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.rerun()
+        st.caption("Do premium products get better ratings?")
+    
+    st.divider()
+    st.markdown("💬 **Or type your own question in the chat below!**")
 
 # Display chat messages
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+for i, message in enumerate(st.session_state.messages):
+    if message["role"] == "user":
+        with st.chat_message("user", avatar="👤"):
+            st.write(message["content"])
+    else:
+        with st.chat_message("assistant", avatar="🤖"):
+            st.write(message["content"])
 
 # Chat input
-if prompt := st.chat_input("Ask about the database..."):
+if prompt := st.chat_input("Ask anything about your data..."):
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
     
     # Display user message
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    with st.chat_message("user", avatar="👤"):
+        st.write(prompt)
     
     # Generate response
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar="🤖"):
       try:
         # Create containers for progress updates
         status_placeholder = st.empty()
@@ -147,15 +188,15 @@ if prompt := st.chat_input("Ask about the database..."):
                     progress_log.append(msg)
 
                     if msg.startswith('✅'):
-                        status_placeholder.text(msg)
+                        status_placeholder.success(msg)
                     elif msg.startswith('⚙️'):
-                        status_placeholder.text(msg)
+                        status_placeholder.info(msg)
                     elif msg.startswith('🔧'):
-                        status_placeholder.text(msg)
+                        status_placeholder.warning(msg)
                     elif msg.startswith('⚠️'):
-                        status_placeholder.text(msg)
+                        status_placeholder.error(msg)
                     elif msg.startswith('📣'):
-                        status_placeholder.text(msg)
+                        status_placeholder.info(msg)
                     else:
                         status_placeholder.text(msg)
 
@@ -166,7 +207,7 @@ if prompt := st.chat_input("Ask about the database..."):
         response_container.empty()
         with response_container:
             final_response = final_state["llm_answer"].content
-            st.markdown(final_response)
+            st.write(final_response)
             st.session_state.messages.append({"role": "assistant", "content": final_response})
 
       except Exception as e:
