@@ -40,6 +40,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid.uuid4())
+if "show_welcome" not in st.session_state:
+    st.session_state.show_welcome = True
 
 # Configure Streamlit page
 st.set_page_config(
@@ -49,101 +51,373 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Sidebar for new chat and navigation
+# Custom CSS matching the UI specs - Databricks compatible
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Maven+Pro:wght@400;500;600;700&display=swap');
+
+/* Global app styling */
+.stApp {
+    font-family: 'Maven Pro', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+}
+
+/* Hide default streamlit elements */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+.css-1rs6os {visibility: hidden;}
+.css-17ziqus {visibility: hidden;}
+
+/* Sidebar styling - Dark theme */
+.css-1d391kg {
+    background-color: #171717 !important;
+    width: 260px !important;
+}
+.css-1lcbmhc {
+    background-color: #171717 !important;
+}
+.css-k1vhr4 {
+    background-color: #171717 !important;
+}
+
+/* Main content area styling */
+.main .block-container {
+    padding: 0 !important;
+    max-width: 100% !important;
+    background: white;
+}
+
+/* Header section */
+.main-header {
+    background: white;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 16px 24px;
+    margin: 0;
+}
+.header-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #111827;
+    margin: 0;
+}
+.dataset-badge {
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: #6b7280;
+    font-weight: 500;
+    display: inline-block;
+    margin-top: 4px;
+}
+
+/* Welcome screen styling */
+.welcome-container {
+    text-align: center;
+    max-width: 600px;
+    margin: 60px auto;
+    padding: 0 40px;
+}
+.welcome-title {
+    font-size: 32px;
+    font-weight: 600;
+    color: #111827;
+    margin-bottom: 40px;
+}
+.example-prompts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 40px;
+}
+.example-prompt {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: left;
+}
+.example-prompt:hover {
+    border-color: #d1d5db;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+.example-prompt-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #111827;
+    margin-bottom: 4px;
+}
+.example-prompt-text {
+    font-size: 13px;
+    color: #6b7280;
+    line-height: 1.4;
+}
+
+/* Chat message styling */
+.user-message {
+    background: #f7f7f8;
+    padding: 24px 0;
+    margin: 0;
+}
+.ai-message {
+    background: white;
+    padding: 24px 0;
+    margin: 0;
+}
+.message-content {
+    max-width: 800px;
+    margin: 0 auto;
+    display: flex;
+    gap: 16px;
+    padding: 0 24px;
+}
+.message-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 500;
+    flex-shrink: 0;
+    color: white;
+}
+.user-avatar {
+    background: #0d9488;
+}
+.ai-avatar {
+    background: #8b5cf6;
+}
+.message-text {
+    flex: 1;
+    line-height: 1.6;
+    font-size: 16px;
+    color: #374151;
+}
+
+/* Chat input styling */
+.stChatInputContainer {
+    background: white !important;
+    border-top: 1px solid #e5e7eb !important;
+}
+.stChatInput > div {
+    max-width: 800px !important;
+    margin: 0 auto !important;
+    padding: 0 24px !important;
+}
+.stChatInput input {
+    border: 1px solid #d1d5db !important;
+    border-radius: 12px !important;
+    font-family: 'Maven Pro', sans-serif !important;
+}
+.stChatInput input:focus {
+    border-color: #8b5cf6 !important;
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1) !important;
+}
+
+/* Sidebar elements */
+.stButton > button {
+    font-family: 'Maven Pro', sans-serif;
+}
+.sidebar-button {
+    width: 100%;
+    background: transparent;
+    border: 1px solid #4d4d4f;
+    color: white;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-family: 'Maven Pro', sans-serif;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.sidebar-button:hover {
+    background: #2d2d2d;
+}
+
+/* Loading animation */
+.loading-dots {
+    display: flex;
+    gap: 4px;
+    justify-content: center;
+    padding: 20px;
+}
+.loading-dot {
+    width: 8px;
+    height: 8px;
+    background: #6b7280;
+    border-radius: 50%;
+    animation: bounce 1.4s infinite ease-in-out both;
+}
+.loading-dot:nth-child(1) { animation-delay: -0.32s; }
+.loading-dot:nth-child(2) { animation-delay: -0.16s; }
+@keyframes bounce {
+    0%, 80%, 100% { transform: scale(0); }
+    40% { transform: scale(1); }
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .example-prompts {
+        grid-template-columns: 1fr;
+    }
+    .welcome-container {
+        padding: 0 20px;
+        margin: 40px auto;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Sidebar with ChatGPT-style dark theme
 with st.sidebar:
-    st.header("Growth Analytics Agent")
-    
     # New Chat button
-    if st.button("🆕 New Chat", use_container_width=True, type="primary"):
+    st.markdown("""
+    <div style="padding: 16px; border-bottom: 1px solid #2d2d2d;">
+        <div class="sidebar-button" onclick="window.location.reload();">
+            <span style="margin-right: 8px;">+</span> New chat
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Alternative Streamlit button for functionality
+    if st.button("🔄 New Chat", key="new_chat_btn"):
         st.session_state.messages = []
         st.session_state.thread_id = str(uuid.uuid4())
+        st.session_state.show_welcome = True
         st.rerun()
     
-    st.divider()
-    
-    # Database info
-    st.subheader("📊 Dataset Info")
-    st.info("**Amazon Reviews (2002-2023)**")
-    
-    with st.expander("📋 Data Details"):
-        st.write("• **413k** feedback records")
-        st.write("• **8,145** products") 
-        st.write("• **12** companies")
-        st.write("• Ratings: 1-5 stars")
-        st.write("• Companies: Apple, Samsung, Sony, Nike, Adidas, etc.")
-    
-    # Connection status
-    try:
-        db_manager = db_agent_v2.get_database_manager()
-        st.success("✅ Database Connected")
-    except Exception as e:
-        st.error("❌ Database Disconnected")
+    # Chat history placeholder
+    st.markdown("""
+    <div style="padding: 16px; text-align: center; margin-top: 40px; opacity: 0.5;">
+        <span style="font-size: 12px; color: #8e8ea0;">Previous chats will appear here</span>
+    </div>
+    """, unsafe_allow_html=True)
 
 # Main content area
-st.title("🔍 Ask anything about your data")
+# Header
+st.markdown("""
+<div class="main-header">
+    <div>
+        <div class="header-title">Growth Analytics Agent</div>
+        <div class="dataset-badge">Amazon Reviews (2002-2023)</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-# Show welcome screen with example prompts if no messages
-if not st.session_state.messages:
-    st.markdown("### 💡 Try these example questions:")
+# Show welcome screen if no messages
+if not st.session_state.messages and st.session_state.show_welcome:
+    st.markdown("""
+    <div class="welcome-container">
+        <div class="welcome-title">Ask anything about your data</div>
+        <div class="example-prompts">
+            <div class="example-prompt" id="prompt1">
+                <div class="example-prompt-title">🔍 Root Cause Analysis</div>
+                <div class="example-prompt-text">Why did adidas ratings decrease in early 2016?</div>
+            </div>
+            <div class="example-prompt" id="prompt2">
+                <div class="example-prompt-title">📈 Key Drivers</div>
+                <div class="example-prompt-text">Which companies drove rating improvements since 2022?</div>
+            </div>
+            <div class="example-prompt" id="prompt3">
+                <div class="example-prompt-title">📊 Time Trends</div>
+                <div class="example-prompt-text">How did ratings change over time per company?</div>
+            </div>
+            <div class="example-prompt" id="prompt4">
+                <div class="example-prompt-title">⚖️ Comparative Analysis</div>
+                <div class="example-prompt-text">Do premium products get better ratings?</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Create columns for example prompts
+    # Clickable buttons for example prompts (Streamlit functionality)
     col1, col2 = st.columns(2)
-    
     with col1:
-        if st.button("🔍 Root Cause Analysis", use_container_width=True):
+        if st.button("🔍 Root Cause Analysis", key="btn1", use_container_width=True):
             prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
             st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.show_welcome = False
             st.rerun()
-        st.caption("Why did adidas ratings decrease in early 2016?")
-        
-        if st.button("📊 Time Trends", use_container_width=True):
+        if st.button("📊 Time Trends", key="btn3", use_container_width=True):
             prompt = "how these ratings changed over time per company?"
             st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.show_welcome = False
             st.rerun()
-        st.caption("How did ratings change over time per company?")
     
     with col2:
-        if st.button("📈 Key Drivers", use_container_width=True):
+        if st.button("📈 Key Drivers", key="btn2", use_container_width=True):
             prompt = "which companies contributed to the increase in ratings from September 2022?"
             st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.show_welcome = False
             st.rerun()
-        st.caption("Which companies drove rating improvements since 2022?")
-        
-        if st.button("⚖️ Comparative Analysis", use_container_width=True):
+        if st.button("⚖️ Comparative Analysis", key="btn4", use_container_width=True):
             prompt = "Are premium-priced products getting better ratings than budget products?"
             st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.show_welcome = False
             st.rerun()
-        st.caption("Do premium products get better ratings?")
-    
-    st.divider()
-    st.markdown("💬 **Or type your own question in the chat below!**")
 
-# Display chat messages
-for i, message in enumerate(st.session_state.messages):
+# Display chat messages with ChatGPT-style layout
+for message in st.session_state.messages:
     if message["role"] == "user":
-        with st.chat_message("user", avatar="👤"):
-            st.write(message["content"])
+        st.markdown(f"""
+        <div class="user-message">
+            <div class="message-content">
+                <div class="message-avatar user-avatar">You</div>
+                <div class="message-text">{message["content"]}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     else:
-        with st.chat_message("assistant", avatar="🤖"):
-            st.write(message["content"])
+        st.markdown(f"""
+        <div class="ai-message">
+            <div class="message-content">
+                <div class="message-avatar ai-avatar">AI</div>
+                <div class="message-text">{message["content"]}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
 # Chat input
 if prompt := st.chat_input("Ask anything about your data..."):
+    # Hide welcome screen
+    st.session_state.show_welcome = False
+    
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
     
     # Display user message
-    with st.chat_message("user", avatar="👤"):
-        st.write(prompt)
+    st.markdown(f"""
+    <div class="user-message">
+        <div class="message-content">
+            <div class="message-avatar user-avatar">You</div>
+            <div class="message-text">{prompt}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Generate response
-    with st.chat_message("assistant", avatar="🤖"):
-      try:
-        # Create containers for progress updates
-        status_placeholder = st.empty()
-        progress_placeholder = st.empty()
-        response_container = st.container()
-
+    # Generate response with loading indicator
+    loading_placeholder = st.empty()
+    loading_placeholder.markdown("""
+    <div class="ai-message">
+        <div class="message-content">
+            <div class="message-avatar ai-avatar">AI</div>
+            <div class="message-text">
+                <div class="loading-dots">
+                    <div class="loading-dot"></div>
+                    <div class="loading-dot"></div>
+                    <div class="loading-dot"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    try:
         # Convert chat history to LangGraph format
         messages_log = []
         for msg in st.session_state.messages[:-1]:  # exclude current user prompt
@@ -186,31 +460,32 @@ if prompt := st.chat_input("Ask anything about your data..."):
                 try:
                     msg = progress_queue.get_nowait()
                     progress_log.append(msg)
-
-                    if msg.startswith('✅'):
-                        status_placeholder.success(msg)
-                    elif msg.startswith('⚙️'):
-                        status_placeholder.info(msg)
-                    elif msg.startswith('🔧'):
-                        status_placeholder.warning(msg)
-                    elif msg.startswith('⚠️'):
-                        status_placeholder.error(msg)
-                    elif msg.startswith('📣'):
-                        status_placeholder.info(msg)
-                    else:
-                        status_placeholder.text(msg)
-
+                    # Show progress in loading area
                 except queue.Empty:
                     pass
 
-        # Final response
-        response_container.empty()
-        with response_container:
-            final_response = final_state["llm_answer"].content
-            st.write(final_response)
-            st.session_state.messages.append({"role": "assistant", "content": final_response})
+        # Display final response
+        loading_placeholder.empty()
+        final_response = final_state["llm_answer"].content
+        st.markdown(f"""
+        <div class="ai-message">
+            <div class="message-content">
+                <div class="message-avatar ai-avatar">AI</div>
+                <div class="message-text">{final_response}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.session_state.messages.append({"role": "assistant", "content": final_response})
 
-      except Exception as e:
+    except Exception as e:
+        loading_placeholder.empty()
         error_msg = f"Sorry, I encountered an error: {str(e)}"
-        st.error(error_msg)
+        st.markdown(f"""
+        <div class="ai-message">
+            <div class="message-content">
+                <div class="message-avatar ai-avatar">AI</div>
+                <div class="message-text" style="color: #dc2626;">{error_msg}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": error_msg})
