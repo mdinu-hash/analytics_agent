@@ -69,16 +69,16 @@ header {visibility: hidden;}
 .css-1rs6os {visibility: hidden;}
 .css-17ziqus {visibility: hidden;}
 
-/* Sidebar styling - Dark theme */
+/* Sidebar styling - Light theme */
 .css-1d391kg {
-    background-color: #171717 !important;
+    background-color: #f8fafc !important;
     width: 260px !important;
 }
 .css-1lcbmhc {
-    background-color: #171717 !important;
+    background-color: #f8fafc !important;
 }
 .css-k1vhr4 {
-    background-color: #171717 !important;
+    background-color: #f8fafc !important;
 }
 
 /* Main content area styling */
@@ -90,27 +90,29 @@ header {visibility: hidden;}
 
 /* Header section */
 .main-header {
-    background: white;
-    border-bottom: 1px solid #e5e7eb;
-    padding: 16px 24px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+    border-bottom: none;
+    padding: 24px;
     margin: 0;
 }
 .header-title {
-    font-size: 18px;
-    font-weight: 600;
-    color: #111827;
+    font-size: 24px;
+    font-weight: 700;
+    color: #ffffff;
     margin: 0;
+    text-align: left;
 }
 .dataset-badge {
-    background: #f3f4f6;
-    border: 1px solid #e5e7eb;
-    border-radius: 16px;
-    padding: 6px 12px;
-    font-size: 12px;
-    color: #6b7280;
-    font-weight: 500;
-    display: inline-block;
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 400;
+    display: block;
     margin-top: 4px;
+    text-align: left;
 }
 
 /* Welcome screen styling */
@@ -206,7 +208,7 @@ header {visibility: hidden;}
     border-top: 1px solid #e5e7eb !important;
 }
 .stChatInput > div {
-    max-width: 800px !important;
+    max-width: 900px !important;
     margin: 0 auto !important;
     padding: 0 24px !important;
 }
@@ -226,9 +228,9 @@ header {visibility: hidden;}
 }
 .sidebar-button {
     width: 100%;
-    background: transparent;
-    border: 1px solid #4d4d4f;
-    color: white;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    color: #374151;
     padding: 12px 16px;
     border-radius: 8px;
     font-family: 'Maven Pro', sans-serif;
@@ -236,7 +238,7 @@ header {visibility: hidden;}
     transition: all 0.2s ease;
 }
 .sidebar-button:hover {
-    background: #2d2d2d;
+    background: #f3f4f6;
 }
 
 /* Loading animation */
@@ -294,7 +296,7 @@ with st.sidebar:
     # Chat history placeholder
     st.markdown("""
     <div style="padding: 16px; text-align: center; margin-top: 40px; opacity: 0.5;">
-        <span style="font-size: 12px; color: #8e8ea0;">Previous chats will appear here</span>
+        <span style="font-size: 12px; color: #64748b;">Previous chats will appear here</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -302,10 +304,8 @@ with st.sidebar:
 # Header
 st.markdown("""
 <div class="main-header">
-    <div>
-        <div class="header-title">Growth Analytics Agent</div>
-        <div class="dataset-badge">Amazon Reviews (2002-2023)</div>
-    </div>
+    <div class="header-title">Growth Analytics Agent</div>
+    <div class="dataset-badge">Amazon Reviews (2002-2023)</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -335,30 +335,26 @@ if not st.session_state.messages and st.session_state.show_welcome:
     </div>
     """, unsafe_allow_html=True)
     
+    # Initialize example prompt selection state
+    if "selected_prompt" not in st.session_state:
+        st.session_state.selected_prompt = ""
+    
     # Clickable buttons for example prompts (Streamlit functionality)
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🔍 Root Cause Analysis", key="btn1", use_container_width=True):
-            prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            st.session_state.show_welcome = False
+            st.session_state.selected_prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
             st.rerun()
         if st.button("📊 Time Trends", key="btn3", use_container_width=True):
-            prompt = "how these ratings changed over time per company?"
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            st.session_state.show_welcome = False
+            st.session_state.selected_prompt = "how these ratings changed over time per company?"
             st.rerun()
     
     with col2:
         if st.button("📈 Key Drivers", key="btn2", use_container_width=True):
-            prompt = "which companies contributed to the increase in ratings from September 2022?"
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            st.session_state.show_welcome = False
+            st.session_state.selected_prompt = "which companies contributed to the increase in ratings from September 2022?"
             st.rerun()
         if st.button("⚖️ Comparative Analysis", key="btn4", use_container_width=True):
-            prompt = "Are premium-priced products getting better ratings than budget products?"
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            st.session_state.show_welcome = False
+            st.session_state.selected_prompt = "Are premium-priced products getting better ratings than budget products?"
             st.rerun()
 
 # Display chat messages with ChatGPT-style layout
@@ -382,8 +378,15 @@ for message in st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
-# Chat input
-if prompt := st.chat_input("Ask anything about your data..."):
+# Check if example prompt was selected and process it
+if st.session_state.get("selected_prompt", ""):
+    prompt = st.session_state.selected_prompt
+    st.session_state.selected_prompt = ""
+else:
+    # Chat input
+    prompt = st.chat_input("Ask anything about your data...")
+
+if prompt:
     # Hide welcome screen
     st.session_state.show_welcome = False
     
