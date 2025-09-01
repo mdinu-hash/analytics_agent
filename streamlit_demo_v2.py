@@ -42,8 +42,6 @@ if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid.uuid4())
 if "show_welcome" not in st.session_state:
     st.session_state.show_welcome = True
-if "processing_response" not in st.session_state:
-    st.session_state.processing_response = False
 
 # Configure Streamlit page
 st.set_page_config(
@@ -102,7 +100,7 @@ header {visibility: hidden;}
 .header-title {
     font-size: 24px;
     font-weight: 700;
-    color: #ffffff;
+    color: #000000;
     margin: 0;
     text-align: left;
 }
@@ -112,7 +110,7 @@ header {visibility: hidden;}
     border-radius: 0;
     padding: 0;
     font-size: 14px;
-    color: rgba(255, 255, 255, 0.9);
+    color: #000000;
     font-weight: 400;
     display: block;
     margin-top: 4px;
@@ -129,7 +127,7 @@ header {visibility: hidden;}
 .welcome-title {
     font-size: 32px;
     font-weight: 600;
-    color: #ffffff;
+    color: #000000;
     margin-bottom: 40px;
 }
 .example-prompts {
@@ -351,10 +349,7 @@ else:
     # Chat input with default Streamlit styling
     prompt = st.chat_input("Ask anything about your data...")
 
-if prompt and not st.session_state.processing_response:
-    # Set processing flag to prevent re-processing
-    st.session_state.processing_response = True
-    
+if prompt:
     # Hide welcome screen
     st.session_state.show_welcome = False
     
@@ -460,6 +455,3 @@ if prompt and not st.session_state.processing_response:
         </div>
         """, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": error_msg})
-    
-    # Reset processing flag
-    st.session_state.processing_response = False
