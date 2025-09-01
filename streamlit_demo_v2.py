@@ -135,8 +135,11 @@ header {visibility: hidden;}
 .example-prompts {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: 8px;
     margin-bottom: 40px;
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
 }
 .example-prompt {
     background: white;
@@ -288,8 +291,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Show welcome screen if no messages
-if not st.session_state.messages and st.session_state.show_welcome:
+# Show welcome content if in welcome mode
+if st.session_state.show_welcome:
     st.markdown("""
     <div class="welcome-container">
         <div class="welcome-title">Ask anything about your data</div>
@@ -447,10 +450,6 @@ if prompt:
 
     except Exception as e:
         loading_placeholder.empty()
-        # More detailed error information
-        error_details = f"Error Type: {type(e).__name__}\nError Message: {str(e)}"
-        st.error(f"Debug info: {error_details}")
-        
         error_msg = f"Sorry, I encountered an error: {str(e)}"
         st.markdown(f"""
         <div class="ai-message">
