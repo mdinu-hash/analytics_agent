@@ -142,30 +142,6 @@ header {visibility: hidden;}
     margin-left: auto;
     margin-right: auto;
 }
-.example-prompt {
-    background: white;
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
-    padding: 16px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    text-align: left;
-}
-.example-prompt:hover {
-    border-color: #d1d5db;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-.example-prompt-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: #111827;
-    margin-bottom: 4px;
-}
-.example-prompt-text {
-    font-size: 13px;
-    color: #6b7280;
-    line-height: 1.4;
-}
 
 /* Chat message styling */
 .user-message {
@@ -212,12 +188,12 @@ header {visibility: hidden;}
 }
 
 /* Chat input styling - Note: Streamlit restricts input field background customization */
-/* Try to style the container area around the chat input */
+/* Make chat input area inherit background like header does */
 section[data-testid="stBottom"], 
 .stBottom,
 div[data-testid="stBottom"] > div,
 .element-container:has(.stChatInput) {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
+    background: inherit !important;
 }
 
 .stChatInput {
@@ -226,7 +202,6 @@ div[data-testid="stBottom"] > div,
 
 .stChatInput > div {
     background: inherit !important;
-    padding: 16px 24px !important;
 }
 
 /* Sidebar elements */
@@ -304,12 +279,6 @@ div[data-testid="stBottom"] > div,
         gap: 10px;
         max-width: 350px;
     }
-    .example-prompt {
-        padding: 14px;
-    }
-    .example-prompt-text {
-        font-size: 12px;
-    }
     .welcome-container {
         padding: 0 24px;
         margin: 32px auto;
@@ -349,14 +318,6 @@ div[data-testid="stBottom"] > div,
     .example-prompts {
         max-width: 300px;
         gap: 8px;
-    }
-    .example-prompt {
-        padding: 12px;
-        border-radius: 8px;
-    }
-    .example-prompt-text {
-        font-size: 11px;
-        line-height: 1.3;
     }
     .welcome-container {
         padding: 0 16px;
