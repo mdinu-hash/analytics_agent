@@ -133,11 +133,11 @@ header {visibility: hidden;}
     font-family: 'Maven Pro', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 .example-prompts {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
     margin-bottom: 40px;
-    max-width: 500px;
+    max-width: 400px;
     margin-left: auto;
     margin-right: auto;
 }
@@ -210,15 +210,21 @@ header {visibility: hidden;}
     background: inherit !important;
 }
 
-/* Chat input styling - Use default Streamlit styling */
+/* Chat input styling */
 .stChatInputContainer {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
+    background: inherit !important;
     border-top: none !important;
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: 1000 !important;
 }
 .stChatInput > div {
     max-width: 900px !important;
     margin: 0 auto !important;
-    padding: 0 24px !important;
+    padding: 16px 24px !important;
+    background: inherit !important;
 }
 
 /* Sidebar elements */
@@ -293,9 +299,8 @@ header {visibility: hidden;}
         margin-bottom: 24px;
     }
     .example-prompts {
-        grid-template-columns: 1fr;
         gap: 10px;
-        max-width: 400px;
+        max-width: 350px;
     }
     .example-prompt {
         padding: 14px;
@@ -323,7 +328,7 @@ header {visibility: hidden;}
         font-size: 14px;
     }
     .stChatInput > div {
-        padding: 0 16px !important;
+        padding: 16px !important;
     }
 }
 
@@ -340,7 +345,7 @@ header {visibility: hidden;}
         margin-bottom: 20px;
     }
     .example-prompts {
-        max-width: 100%;
+        max-width: 300px;
         gap: 8px;
     }
     .example-prompt {
@@ -372,7 +377,7 @@ header {visibility: hidden;}
         line-height: 1.5;
     }
     .stChatInput > div {
-        padding: 0 12px !important;
+        padding: 12px !important;
     }
     .ai-message, .user-message {
         padding: 16px 0;
@@ -420,23 +425,16 @@ if st.session_state.show_welcome:
     if "selected_prompt" not in st.session_state:
         st.session_state.selected_prompt = ""
     
-    # Example prompt buttons for functionality
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Why did adidas ratings decrease in early 2016?", key="btn1", help="Click to use this prompt"):
-            st.session_state.selected_prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
-            st.rerun()
-        if st.button("How did ratings change over time per company?", key="btn3", help="Click to use this prompt"):
-            st.session_state.selected_prompt = "how these ratings changed over time per company?"
-            st.rerun()
-    
-    with col2:
-        if st.button("Which companies drove rating improvements since 2022?", key="btn2", help="Click to use this prompt"):
-            st.session_state.selected_prompt = "which companies contributed to the increase in ratings from September 2022?"
-            st.rerun()
-        if st.button("Do premium products get better ratings?", key="btn4", help="Click to use this prompt"):
-            st.session_state.selected_prompt = "Are premium-priced products getting better ratings than budget products?"
-            st.rerun()
+    # Example prompt buttons for functionality - 3 prompts stacked vertically
+    if st.button("Why did adidas ratings decrease in early 2016?", key="btn1", help="Click to use this prompt"):
+        st.session_state.selected_prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
+        st.rerun()
+    if st.button("Which companies drove rating improvements since 2022?", key="btn2", help="Click to use this prompt"):
+        st.session_state.selected_prompt = "which companies contributed to the increase in ratings from September 2022?"
+        st.rerun()
+    if st.button("How did ratings change over time per company?", key="btn3", help="Click to use this prompt"):
+        st.session_state.selected_prompt = "how these ratings changed over time per company?"
+        st.rerun()
 
 # Display chat messages with ChatGPT-style layout
 for message in st.session_state.messages:
