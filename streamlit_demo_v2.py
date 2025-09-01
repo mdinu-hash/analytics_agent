@@ -70,15 +70,17 @@ header {visibility: hidden;}
 .css-17ziqus {visibility: hidden;}
 
 /* Sidebar styling - Light theme */
-.css-1d391kg {
+.stSidebar, .css-1d391kg, .css-1lcbmhc, .css-k1vhr4, [data-testid="stSidebar"] {
     background-color: #f8fafc !important;
     width: 260px !important;
 }
-.css-1lcbmhc {
+.stSidebar > div, .css-1d391kg > div, .css-1lcbmhc > div, .css-k1vhr4 > div {
     background-color: #f8fafc !important;
 }
-.css-k1vhr4 {
-    background-color: #f8fafc !important;
+/* Ensure sidebar is visible */
+.stSidebar, [data-testid="stSidebar"] {
+    display: block !important;
+    visibility: visible !important;
 }
 
 /* Main content area styling */
@@ -161,12 +163,12 @@ header {visibility: hidden;}
 
 /* Chat message styling */
 .user-message {
-    background: #f7f7f8;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
     padding: 24px 0;
     margin: 0;
 }
 .ai-message {
-    background: white;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
     padding: 24px 0;
     margin: 0;
 }
@@ -317,6 +319,24 @@ if not st.session_state.messages and st.session_state.show_welcome:
     # Initialize example prompt selection state
     if "selected_prompt" not in st.session_state:
         st.session_state.selected_prompt = ""
+    
+    # Add invisible buttons for functionality
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Why did adidas ratings decrease in early 2016?", key="btn1", help="Click to use this prompt"):
+            st.session_state.selected_prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
+            st.rerun()
+        if st.button("How did ratings change over time per company?", key="btn3", help="Click to use this prompt"):
+            st.session_state.selected_prompt = "how these ratings changed over time per company?"
+            st.rerun()
+    
+    with col2:
+        if st.button("Which companies drove rating improvements since 2022?", key="btn2", help="Click to use this prompt"):
+            st.session_state.selected_prompt = "which companies contributed to the increase in ratings from September 2022?"
+            st.rerun()
+        if st.button("Do premium products get better ratings?", key="btn4", help="Click to use this prompt"):
+            st.session_state.selected_prompt = "Are premium-priced products getting better ratings than budget products?"
+            st.rerun()
 
 # Display chat messages with ChatGPT-style layout
 for message in st.session_state.messages:
