@@ -225,20 +225,12 @@ header {visibility: hidden;}
 /* Sidebar elements */
 .stButton > button {
     font-family: 'Maven Pro', sans-serif;
+    background: #ffffff !important;
+    border: 1px solid #e5e7eb !important;
+    color: #374151 !important;
 }
-.sidebar-button {
-    width: 100%;
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    color: #374151;
-    padding: 12px 16px;
-    border-radius: 8px;
-    font-family: 'Maven Pro', sans-serif;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-.sidebar-button:hover {
-    background: #f3f4f6;
+.stButton > button:hover {
+    background: #f3f4f6 !important;
 }
 
 /* Loading animation */
@@ -277,17 +269,8 @@ header {visibility: hidden;}
 
 # Sidebar with ChatGPT-style dark theme
 with st.sidebar:
-    # New Chat button
-    st.markdown("""
-    <div style="padding: 16px; border-bottom: 1px solid #2d2d2d;">
-        <div class="sidebar-button" onclick="window.location.reload();">
-            <span style="margin-right: 8px;">+</span> New chat
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Alternative Streamlit button for functionality
-    if st.button("🔄 New Chat", key="new_chat_btn"):
+    # New Chat button with functionality
+    if st.button("+ New chat", key="new_chat_btn", use_container_width=True):
         st.session_state.messages = []
         st.session_state.thread_id = str(uuid.uuid4())
         st.session_state.show_welcome = True
@@ -316,19 +299,15 @@ if not st.session_state.messages and st.session_state.show_welcome:
         <div class="welcome-title">Ask anything about your data</div>
         <div class="example-prompts">
             <div class="example-prompt" id="prompt1">
-                <div class="example-prompt-title">🔍 Root Cause Analysis</div>
                 <div class="example-prompt-text">Why did adidas ratings decrease in early 2016?</div>
             </div>
             <div class="example-prompt" id="prompt2">
-                <div class="example-prompt-title">📈 Key Drivers</div>
                 <div class="example-prompt-text">Which companies drove rating improvements since 2022?</div>
             </div>
             <div class="example-prompt" id="prompt3">
-                <div class="example-prompt-title">📊 Time Trends</div>
                 <div class="example-prompt-text">How did ratings change over time per company?</div>
             </div>
             <div class="example-prompt" id="prompt4">
-                <div class="example-prompt-title">⚖️ Comparative Analysis</div>
                 <div class="example-prompt-text">Do premium products get better ratings?</div>
             </div>
         </div>
@@ -338,24 +317,6 @@ if not st.session_state.messages and st.session_state.show_welcome:
     # Initialize example prompt selection state
     if "selected_prompt" not in st.session_state:
         st.session_state.selected_prompt = ""
-    
-    # Clickable buttons for example prompts (Streamlit functionality)
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🔍 Root Cause Analysis", key="btn1", use_container_width=True):
-            st.session_state.selected_prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
-            st.rerun()
-        if st.button("📊 Time Trends", key="btn3", use_container_width=True):
-            st.session_state.selected_prompt = "how these ratings changed over time per company?"
-            st.rerun()
-    
-    with col2:
-        if st.button("📈 Key Drivers", key="btn2", use_container_width=True):
-            st.session_state.selected_prompt = "which companies contributed to the increase in ratings from September 2022?"
-            st.rerun()
-        if st.button("⚖️ Comparative Analysis", key="btn4", use_container_width=True):
-            st.session_state.selected_prompt = "Are premium-priced products getting better ratings than budget products?"
-            st.rerun()
 
 # Display chat messages with ChatGPT-style layout
 for message in st.session_state.messages:

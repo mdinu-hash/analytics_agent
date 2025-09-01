@@ -6,7 +6,7 @@ import uuid
 import datetime
 from pathlib import Path
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 from langchain.callbacks.tracers.langchain import LangChainTracer
 from src.init.init_demo_database.demo_database_util import DemoDatabaseMetadataManager
 
@@ -17,11 +17,13 @@ load_dotenv(root_env_path, override=True)
 
 # Get environment variables
 openai_api_key = os.getenv('OPENAI_API_KEY')
+ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 LANGSMITH_API_KEY = os.getenv('LANGSMITH_API_KEY')
 connection_string = os.getenv('CONNECTION_STRING_DB')
 
 # Set environment variables for OpenAI and LangSmith
 os.environ['OPENAI_API_KEY'] = openai_api_key
+os.environ['ANTHROPIC_API_KEY'] = ANTHROPIC_API_KEY
 os.environ['LANGSMITH_API_KEY'] = LANGSMITH_API_KEY
 os.environ['LANGSMITH_TRACING'] = "true"
 os.environ['LANGSMITH_ENDPOINT'] = "https://api.smith.langchain.com"
@@ -32,8 +34,8 @@ os.environ['LANGSMITH_PROJECT'] = langsmith_project_name
 tracer = LangChainTracer(project_name=langsmith_project_name)
 
 # Initialize LLM models
-llm = ChatOpenAI(model='gpt-4.1', temperature=0)  # Smart & expensive
-llm_fast = ChatOpenAI(model='gpt-4o', temperature=0)  # Faster
+llm = ChatAnthropic(model='claude-sonnet-4-20250514', temperature=0)  # Smart & expensive
+llm_fast = ChatAnthropic(model='claude-sonnet-4-20250514', temperature=0)  # Faster
 
 def create_config(run_name: str, is_new_thread_id: bool = False, thread_id: str = None):
     """
