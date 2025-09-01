@@ -254,13 +254,128 @@ header {visibility: hidden;}
 }
 
 /* Responsive design */
-@media (max-width: 768px) {
-    .example-prompts {
-        grid-template-columns: 1fr;
+
+/* Small laptops and tablets (768px - 1024px) */
+@media (max-width: 1024px) {
+    .header-title {
+        font-size: 22px;
+    }
+    .welcome-title {
+        font-size: 28px;
+        margin-bottom: 32px;
     }
     .welcome-container {
+        max-width: 500px;
+        padding: 0 32px;
+        margin: 50px auto;
+    }
+    .main-header {
+        padding: 20px;
+    }
+    .message-content {
         padding: 0 20px;
-        margin: 40px auto;
+    }
+    .stChatInput > div {
+        padding: 0 20px !important;
+    }
+}
+
+/* Tablets (768px and below) */
+@media (max-width: 768px) {
+    .header-title {
+        font-size: 20px;
+    }
+    .dataset-badge {
+        font-size: 12px;
+    }
+    .welcome-title {
+        font-size: 24px;
+        margin-bottom: 24px;
+    }
+    .example-prompts {
+        grid-template-columns: 1fr;
+        gap: 10px;
+        max-width: 400px;
+    }
+    .example-prompt {
+        padding: 14px;
+    }
+    .example-prompt-text {
+        font-size: 12px;
+    }
+    .welcome-container {
+        padding: 0 24px;
+        margin: 32px auto;
+    }
+    .main-header {
+        padding: 16px;
+    }
+    .message-content {
+        padding: 0 16px;
+        gap: 12px;
+    }
+    .message-avatar {
+        width: 28px;
+        height: 28px;
+        font-size: 12px;
+    }
+    .message-text {
+        font-size: 14px;
+    }
+    .stChatInput > div {
+        padding: 0 16px !important;
+    }
+}
+
+/* Mobile phones (480px and below) */
+@media (max-width: 480px) {
+    .header-title {
+        font-size: 18px;
+    }
+    .dataset-badge {
+        font-size: 11px;
+    }
+    .welcome-title {
+        font-size: 20px;
+        margin-bottom: 20px;
+    }
+    .example-prompts {
+        max-width: 100%;
+        gap: 8px;
+    }
+    .example-prompt {
+        padding: 12px;
+        border-radius: 8px;
+    }
+    .example-prompt-text {
+        font-size: 11px;
+        line-height: 1.3;
+    }
+    .welcome-container {
+        padding: 0 16px;
+        margin: 24px auto;
+    }
+    .main-header {
+        padding: 12px;
+    }
+    .message-content {
+        padding: 0 12px;
+        gap: 10px;
+    }
+    .message-avatar {
+        width: 24px;
+        height: 24px;
+        font-size: 10px;
+    }
+    .message-text {
+        font-size: 13px;
+        line-height: 1.5;
+    }
+    .stChatInput > div {
+        padding: 0 12px !important;
+    }
+    .ai-message, .user-message {
+        padding: 16px 0;
     }
 }
 </style>
