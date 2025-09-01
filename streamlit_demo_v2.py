@@ -99,10 +99,11 @@ header {visibility: hidden;}
 }
 .header-title {
     font-size: 24px;
-    font-weight: 700;
+    font-weight: 600;
     color: #000000;
     margin: 0;
     text-align: left;
+    font-family: 'Maven Pro', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 .dataset-badge {
     background: none;
@@ -129,6 +130,7 @@ header {visibility: hidden;}
     font-weight: 600;
     color: #000000;
     margin-bottom: 40px;
+    font-family: 'Maven Pro', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 .example-prompts {
     display: grid;
@@ -445,6 +447,10 @@ if prompt:
 
     except Exception as e:
         loading_placeholder.empty()
+        # More detailed error information
+        error_details = f"Error Type: {type(e).__name__}\nError Message: {str(e)}"
+        st.error(f"Debug info: {error_details}")
+        
         error_msg = f"Sorry, I encountered an error: {str(e)}"
         st.markdown(f"""
         <div class="ai-message">
