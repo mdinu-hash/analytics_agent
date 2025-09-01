@@ -92,7 +92,7 @@ header {visibility: hidden;}
 
 /* Header section */
 .main-header {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
+    background: inherit !important;
     border-bottom: none;
     padding: 24px;
     margin: 0;
@@ -388,14 +388,14 @@ if prompt:
     try:
         # Convert chat history to LangGraph format
         messages_log = []
-        for msg in st.session_state.messages[:-1]:  # exclude current user prompt
+        for msg in st.session_state.messages:  # include all messages including current prompt
             if msg["role"] == "user":
                 messages_log.append(HumanMessage(content=msg["content"]))
             else:
                 messages_log.append(AIMessage(content=msg["content"]))
 
         # Prepare agent input state
-        if len(messages_log) == 0:  # first message
+        if len(st.session_state.messages) == 1:  # first message (only current user message)
             state_dict = {
                 'objects_documentation': objects_documentation,
                 'database_content': database_content,
