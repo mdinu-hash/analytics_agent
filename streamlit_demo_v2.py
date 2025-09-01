@@ -135,6 +135,7 @@ header {visibility: hidden;}
 .example-prompts {
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 12px;
     margin-bottom: 40px;
     max-width: 400px;
@@ -210,21 +211,22 @@ header {visibility: hidden;}
     background: inherit !important;
 }
 
-/* Chat input styling */
-.stChatInputContainer {
-    background: inherit !important;
-    border-top: none !important;
-    position: fixed !important;
-    bottom: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    z-index: 1000 !important;
+/* Chat input styling - Note: Streamlit restricts input field background customization */
+/* Try to style the container area around the chat input */
+section[data-testid="stBottom"], 
+.stBottom,
+div[data-testid="stBottom"] > div,
+.element-container:has(.stChatInput) {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
 }
-.stChatInput > div {
-    max-width: 900px !important;
-    margin: 0 auto !important;
-    padding: 16px 24px !important;
+
+.stChatInput {
     background: inherit !important;
+}
+
+.stChatInput > div {
+    background: inherit !important;
+    padding: 16px 24px !important;
 }
 
 /* Sidebar elements */
@@ -425,16 +427,18 @@ if st.session_state.show_welcome:
     if "selected_prompt" not in st.session_state:
         st.session_state.selected_prompt = ""
     
-    # Example prompt buttons for functionality - 3 prompts stacked vertically
-    if st.button("Why did adidas ratings decrease in early 2016?", key="btn1", help="Click to use this prompt"):
-        st.session_state.selected_prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
-        st.rerun()
-    if st.button("Which companies drove rating improvements since 2022?", key="btn2", help="Click to use this prompt"):
-        st.session_state.selected_prompt = "which companies contributed to the increase in ratings from September 2022?"
-        st.rerun()
-    if st.button("How did ratings change over time per company?", key="btn3", help="Click to use this prompt"):
-        st.session_state.selected_prompt = "how these ratings changed over time per company?"
-        st.rerun()
+    # Example prompt buttons for functionality - 3 prompts stacked vertically and centered
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("Why did adidas ratings decrease in early 2016?", key="btn1", help="Click to use this prompt", use_container_width=True):
+            st.session_state.selected_prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
+            st.rerun()
+        if st.button("Which companies drove rating improvements since 2022?", key="btn2", help="Click to use this prompt", use_container_width=True):
+            st.session_state.selected_prompt = "which companies contributed to the increase in ratings from September 2022?"
+            st.rerun()
+        if st.button("How did ratings change over time per company?", key="btn3", help="Click to use this prompt", use_container_width=True):
+            st.session_state.selected_prompt = "how these ratings changed over time per company?"
+            st.rerun()
 
 # Display chat messages with ChatGPT-style layout
 for message in st.session_state.messages:
