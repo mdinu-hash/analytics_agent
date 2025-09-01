@@ -42,6 +42,8 @@ if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid.uuid4())
 if "show_welcome" not in st.session_state:
     st.session_state.show_welcome = True
+if "processing_response" not in st.session_state:
+    st.session_state.processing_response = False
 
 # Configure Streamlit page
 st.set_page_config(
@@ -59,7 +61,7 @@ st.markdown("""
 /* Global app styling */
 .stApp {
     font-family: 'Maven Pro', -apple-system, BlinkMacSystemFont, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
 }
 
 /* Hide default streamlit elements */
@@ -87,12 +89,12 @@ header {visibility: hidden;}
 .main .block-container {
     padding: 0 !important;
     max-width: 100% !important;
-    background: white;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
 }
 
 /* Header section */
 .main-header {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
     border-bottom: none;
     padding: 24px;
     margin: 0;
@@ -127,7 +129,7 @@ header {visibility: hidden;}
 .welcome-title {
     font-size: 32px;
     font-weight: 600;
-    color: #111827;
+    color: #ffffff;
     margin-bottom: 40px;
 }
 .example-prompts {
@@ -163,12 +165,12 @@ header {visibility: hidden;}
 
 /* Chat message styling */
 .user-message {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
     padding: 24px 0;
     margin: 0;
 }
 .ai-message {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
     padding: 24px 0;
     margin: 0;
 }
@@ -201,27 +203,19 @@ header {visibility: hidden;}
     flex: 1;
     line-height: 1.6;
     font-size: 16px;
-    color: #374151;
+    color: #ffffff;
+    background: inherit !important;
 }
 
-/* Chat input styling */
+/* Chat input styling - Use default Streamlit styling */
 .stChatInputContainer {
-    background: white !important;
-    border-top: 1px solid #e5e7eb !important;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
+    border-top: none !important;
 }
 .stChatInput > div {
     max-width: 900px !important;
     margin: 0 auto !important;
     padding: 0 24px !important;
-}
-.stChatInput input {
-    border: 1px solid #d1d5db !important;
-    border-radius: 12px !important;
-    font-family: 'Maven Pro', sans-serif !important;
-}
-.stChatInput input:focus {
-    border-color: #8b5cf6 !important;
-    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1) !important;
 }
 
 /* Sidebar elements */
@@ -299,19 +293,7 @@ if not st.session_state.messages and st.session_state.show_welcome:
     st.markdown("""
     <div class="welcome-container">
         <div class="welcome-title">Ask anything about your data</div>
-        <div class="example-prompts">
-            <div class="example-prompt" id="prompt1">
-                <div class="example-prompt-text">Why did adidas ratings decrease in early 2016?</div>
-            </div>
-            <div class="example-prompt" id="prompt2">
-                <div class="example-prompt-text">Which companies drove rating improvements since 2022?</div>
-            </div>
-            <div class="example-prompt" id="prompt3">
-                <div class="example-prompt-text">How did ratings change over time per company?</div>
-            </div>
-            <div class="example-prompt" id="prompt4">
-                <div class="example-prompt-text">Do premium products get better ratings?</div>
-            </div>
+        <div class="example-prompts" id="example-prompts-container">
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -320,7 +302,7 @@ if not st.session_state.messages and st.session_state.show_welcome:
     if "selected_prompt" not in st.session_state:
         st.session_state.selected_prompt = ""
     
-    # Add invisible buttons for functionality
+    # Example prompt buttons for functionality
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Why did adidas ratings decrease in early 2016?", key="btn1", help="Click to use this prompt"):
@@ -363,11 +345,16 @@ for message in st.session_state.messages:
 if st.session_state.get("selected_prompt", ""):
     prompt = st.session_state.selected_prompt
     st.session_state.selected_prompt = ""
+    # Hide welcome screen when prompt is selected
+    st.session_state.show_welcome = False
 else:
-    # Chat input
+    # Chat input with default Streamlit styling
     prompt = st.chat_input("Ask anything about your data...")
 
-if prompt:
+if prompt and not st.session_state.processing_response:
+    # Set processing flag to prevent re-processing
+    st.session_state.processing_response = True
+    
     # Hide welcome screen
     st.session_state.show_welcome = False
     
@@ -473,3 +460,6 @@ if prompt:
         </div>
         """, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": error_msg})
+    
+    # Reset processing flag
+    st.session_state.processing_response = False
