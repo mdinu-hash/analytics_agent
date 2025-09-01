@@ -93,7 +93,7 @@ header {visibility: hidden;}
 /* Header section */
 .main-header {
     background: inherit !important;
-    border-bottom: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
     padding: 24px;
     margin: 0;
 }
