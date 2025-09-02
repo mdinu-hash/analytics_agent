@@ -28,6 +28,7 @@ from src.init.initialization import (
     llm, llm_fast, create_config, tracer,
     objects_documentation, database_content, sql_dialect, connection_string
 )
+from src.init.llm_util import create_prompt_template, get_token_usage, calculate_chat_history_tokens, llm_provider
 
 # Import PostgreSQL database utility
 from src.init.init_demo_database.demo_database_util import DemoDatabaseMetadataManager
@@ -211,16 +212,16 @@ Important considerations about creating analytical intents:
   Be short, concise, explain in simple, non-technical language.
   """  
 
-  prompt_clear_or_ambiguous = ChatPromptTemplate.from_messages([('system', sys_prompt_clear_or_ambiguous)])
+  prompt_clear_or_ambiguous = create_prompt_template('system', sys_prompt_clear_or_ambiguous)
   chain_1= prompt_clear_or_ambiguous | llm.with_structured_output(ClearOrAmbiguous)  
 
-  prompt_clear = ChatPromptTemplate.from_messages([('system', sys_prompt_clear)])
+  prompt_clear = create_prompt_template('system', sys_prompt_clear)
   chain_2= prompt_clear | llm.with_structured_output(AnalyticalIntents)
 
-  prompt_ambiguous = ChatPromptTemplate.from_messages([('system', sys_prompt_ambiguous)])
+  prompt_ambiguous = create_prompt_template('system', sys_prompt_ambiguous)
   chain_3= prompt_ambiguous | llm.with_structured_output(AnalyticalIntents)
 
-  prompt_notes = ChatPromptTemplate.from_messages([('system', sys_prompt_notes)])
+  prompt_notes = create_prompt_template('system', sys_prompt_notes)
   chain_4= prompt_notes | llm_fast
 
   # Prepare common input data
@@ -334,7 +335,7 @@ def create_sql_query_or_queries(state:State):
     ]  
   """
 
-  prompt = ChatPromptTemplate.from_messages([('system', system_prompt)])
+  prompt = create_prompt_template('system', system_prompt)
 
   chain = prompt | llm.with_structured_output(OutputAsAQuery)
 
@@ -430,7 +431,7 @@ def create_query_analysis(sql_query:str, sql_query_result:str):
                - Avoid technical terms like "data","dataset","table","list","provided information","query" etc.
    """
 
-   prompt = ChatPromptTemplate.from_messages(('system',system_prompt))
+   prompt = create_prompt_template('system', system_prompt)
    chain = prompt | llm_fast.with_structured_output(QueryAnalysis)
    return chain.invoke({'sql_query':sql_query,
                         'sql_query_result':sql_query_result})   
@@ -556,7 +557,7 @@ def correct_syntax_sql_query(sql_query: str, error:str, objects_documentation: s
   Output the corrected version of the query.
   """
  
- prompt = ChatPromptTemplate.from_messages(('system',system_prompt))
+ prompt = create_prompt_template('system', system_prompt)
  chain = prompt | llm.with_structured_output(OutputAsASingleQuery)
  result = chain.invoke({'sql_query':sql_query,'error':error,'objects_documentation':objects_documentation,'database_content':database_content, 'sql_dialect':sql_dialect})
  sql_query = result['query']
@@ -689,7 +690,7 @@ def refine_sql_query(analytical_intent: str, sql_query: str, objects_documentati
          Instead, you can use optimization example D (filter date range) or example B (aggregate time at higher level).                   
   """
  
- prompt = ChatPromptTemplate.from_messages(('system',system_prompt))
+ prompt = create_prompt_template('system', system_prompt)
  chain = prompt | llm.with_structured_output(OutputAsASingleQuery)
 
  sql_query = chain.invoke({'analytical_intent': analytical_intent,
@@ -863,7 +864,7 @@ def generate_answer(state:State):
 
   # create prompt template based on scenario
   sys_prompt = next(s['Prompt'] for s in scenario_prompts if s['Type'] == scenario)
-  prompt = ChatPromptTemplate.from_messages([MessagesPlaceholder("messages_log"),('system',sys_prompt)] )
+  prompt = create_prompt_template('system', sys_prompt, messages_log=True)
   llm_answer_chain = prompt | llm
 
   if scenario == 'A': # show filters
@@ -886,7 +887,10 @@ def generate_answer(state:State):
   # Add token count for SQL metadata if applicable
   if scenario == 'A':
     explanation_token_count = llm.get_num_tokens(create_queries_metadata(state['current_sql_queries']))
-    ai_msg.response_metadata['token_usage']['total_tokens'] += explanation_token_count
+    if llm_provider == 'anthropic':
+        ai_msg.response_metadata['usage']['output_tokens'] += explanation_token_count
+    else:
+        ai_msg.response_metadata['token_usage']['total_tokens'] += explanation_token_count
   
   # Update state (common for all scenarios)
   state['llm_answer'] = ai_msg
@@ -901,11 +905,11 @@ def manage_memory_chat_history(state:State):
     Specifically, it checks if the chat history is larger than 1000 tokens. If yes, keep just the last 4 pairs of human prompts and AI responses, and summarize the older messages.
     Additionally, check if the logs of sql queries is larger than 20 entries. If yes, delete the older records. """           
 
-    tokens_chat_history = state['messages_log'][-1].response_metadata.get('token_usage', {}).get('total_tokens', 0) if state['messages_log'] else 0    
+    tokens_chat_history = calculate_chat_history_tokens(state['messages_log'])    
 
     if tokens_chat_history >= 1000 and len(state['messages_log']) > 4:
         message_history_to_summarize = [msg.content for msg in state['messages_log'][:-4]]
-        prompt = ChatPromptTemplate.from_messages( [('user', 'Distill the below chat messages into a single summary paragraph.The summary paragraph should have maximum 400 tokens.Include as many specific details as you can.Chat messages:{message_history_to_summarize}') ])
+        prompt = create_prompt_template('user', 'Distill the below chat messages into a single summary paragraph.The summary paragraph should have maximum 400 tokens.Include as many specific details as you can.Chat messages:{message_history_to_summarize}')
         runnable = prompt | llm_fast # use the cheap model
         chat_history_summary = runnable.invoke({'message_history_to_summarize':message_history_to_summarize})
         last_4_messages = state['messages_log'][-4:]
@@ -981,7 +985,7 @@ def orchestrator(state:State):
     
     Step 3. Otherwise → "Continue".
     """
-    prompt = ChatPromptTemplate.from_messages([('system', system_prompt)])
+    prompt = create_prompt_template('system', system_prompt)
     chain = prompt | llm_fast.with_structured_output(ScenarioBC)
     result = chain.invoke({'messages_log':extract_msg_content_from_history(state['messages_log']),
                          'question': state['current_question'], 
@@ -1016,7 +1020,7 @@ def orchestrator(state:State):
 
       Be short, concise, explain in simple, non-technical language.
       """
-      prompt_notes = ChatPromptTemplate.from_messages([('system', sys_prompt_notes)]) 
+      prompt_notes = create_prompt_template('system', sys_prompt_notes) 
       chain = prompt_notes | llm_fast
       notes_text = chain.invoke({'messages_log':extract_msg_content_from_history(state['messages_log']),
                          'question': state['current_question'], 

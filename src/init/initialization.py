@@ -7,8 +7,10 @@ import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langchain.callbacks.tracers.langchain import LangChainTracer
 from src.init.init_demo_database.demo_database_util import DemoDatabaseMetadataManager
+from src.init.llm_util import llm_provider
 
 # Load environment variables from root directory
 current_dir = Path(__file__).parent
@@ -33,9 +35,15 @@ os.environ['LANGSMITH_PROJECT'] = langsmith_project_name
 # Set up LangSmith tracer manually
 tracer = LangChainTracer(project_name=langsmith_project_name)
 
-# Initialize LLM models
-llm = ChatAnthropic(model='claude-sonnet-4-20250514', temperature=0)  # Smart & expensive
-llm_fast = ChatAnthropic(model='claude-sonnet-4-20250514', temperature=0)  # Faster
+# Initialize LLM models based on provider
+if llm_provider == 'anthropic':
+    llm = ChatAnthropic(model='claude-sonnet-4-20250514', temperature=0)  # Smart & expensive
+    llm_fast = ChatAnthropic(model='claude-sonnet-4-20250514', temperature=0)  # Faster
+elif llm_provider == 'openai':
+    llm = ChatOpenAI(model='gpt-4o', temperature=0)  # Smart & expensive
+    llm_fast = ChatOpenAI(model='gpt-4o-mini', temperature=0)  # Faster
+else:
+    raise ValueError(f"Unsupported LLM provider: {llm_provider}")  
 
 def create_config(run_name: str, is_new_thread_id: bool = False, thread_id: str = None):
     """
