@@ -145,12 +145,12 @@ header {visibility: hidden;}
 
 /* Chat message styling */
 .user-message {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
+    background: inherit !important;
     padding: 24px 0;
     margin: 0;
 }
 .ai-message {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
+    background: inherit !important;
     padding: 24px 0;
     margin: 0;
 }
@@ -383,8 +383,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Show welcome content only if in welcome mode
-if st.session_state.show_welcome:
+# Show welcome content only if in welcome mode AND no messages exist
+if st.session_state.show_welcome and not st.session_state.messages:
     st.markdown("""
     <div class="welcome-container">
         <div class="welcome-title">Ask anything about your data</div>
@@ -440,10 +440,8 @@ else:
     prompt = st.chat_input("Ask anything about your data...")
 
 if prompt:
-    # Hide welcome screen immediately when prompt is received
+    # Hide welcome screen and add user message to chat history
     st.session_state.show_welcome = False
-    
-    # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
     
     # Display user message
