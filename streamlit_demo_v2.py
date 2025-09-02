@@ -438,6 +438,10 @@ for message in st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
+# Define callback function for chat input
+def handle_chat_submit():
+    st.session_state.show_welcome = False
+
 # Check if example prompt was selected and process it
 if st.session_state.get("selected_prompt", ""):
     prompt = st.session_state.selected_prompt
@@ -446,11 +450,10 @@ if st.session_state.get("selected_prompt", ""):
     st.session_state.show_welcome = False
     st.session_state.messages.append({"role": "user", "content": prompt})
 else:
-    # Chat input with default Streamlit styling
-    prompt = st.chat_input("Ask anything about your data...")
-    # Immediately hide welcome and add message for chat input
+    # Chat input with callback for immediate welcome screen hiding
+    prompt = st.chat_input("Ask anything about your data...", on_submit=handle_chat_submit)
+    # Add message to chat history if prompt exists
     if prompt:
-        st.session_state.show_welcome = False
         st.session_state.messages.append({"role": "user", "content": prompt})
 
 if prompt:
