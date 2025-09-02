@@ -110,7 +110,7 @@ header {visibility: hidden;}
     border: none;
     border-radius: 0;
     padding: 0;
-    font-size: 14px;
+    font-size: 16px;
     color: #000000;
     font-weight: 400;
     display: block;
@@ -383,8 +383,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Show welcome content only if no messages exist
-if not st.session_state.messages:
+# Show welcome content only if in welcome mode
+if st.session_state.show_welcome:
     st.markdown("""
     <div class="welcome-container">
         <div class="welcome-title">Ask anything about your data</div>
@@ -435,14 +435,12 @@ for message in st.session_state.messages:
 if st.session_state.get("selected_prompt", ""):
     prompt = st.session_state.selected_prompt
     st.session_state.selected_prompt = ""
-    # Hide welcome screen when prompt is selected
-    st.session_state.show_welcome = False
 else:
     # Chat input with default Streamlit styling
     prompt = st.chat_input("Ask anything about your data...")
 
 if prompt:
-    # Hide welcome screen
+    # Hide welcome screen immediately when prompt is received
     st.session_state.show_welcome = False
     
     # Add user message to chat history
