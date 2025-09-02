@@ -210,6 +210,7 @@ div[data-testid="stBottom"] > div,
     background: #ffffff !important;
     border: 1px solid #e5e7eb !important;
     color: #374151 !important;
+    font-size: 14px !important;
 }
 .stButton > button:hover {
     background: #f3f4f6 !important;
@@ -265,6 +266,10 @@ div[data-testid="stBottom"] > div,
 
 /* Tablets (768px and below) */
 @media (max-width: 768px) {
+    /* Hide sidebar on mobile/tablet */
+    .stSidebar, [data-testid="stSidebar"] {
+        display: none !important;
+    }
     .header-title {
         font-size: 20px;
     }
@@ -305,6 +310,10 @@ div[data-testid="stBottom"] > div,
 
 /* Mobile phones (480px and below) */
 @media (max-width: 480px) {
+    /* Hide sidebar on mobile */
+    .stSidebar, [data-testid="stSidebar"] {
+        display: none !important;
+    }
     .header-title {
         font-size: 18px;
     }
@@ -374,8 +383,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Show welcome content if in welcome mode
-if st.session_state.show_welcome:
+# Show welcome content only if no messages exist
+if not st.session_state.messages:
     st.markdown("""
     <div class="welcome-container">
         <div class="welcome-title">Ask anything about your data</div>
