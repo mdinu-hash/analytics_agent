@@ -194,14 +194,21 @@ section[data-testid="stBottom"],
 div[data-testid="stBottom"] > div,
 .element-container:has(.stChatInput) {
     background: inherit !important;
+    position: sticky !important;
+    bottom: 0 !important;
+    z-index: 1000 !important;
 }
 
 .stChatInput {
     background: inherit !important;
+    display: block !important;
+    visibility: visible !important;
 }
 
 .stChatInput > div {
     background: inherit !important;
+    display: block !important;
+    visibility: visible !important;
 }
 
 /* Sidebar elements */
@@ -435,14 +442,19 @@ for message in st.session_state.messages:
 if st.session_state.get("selected_prompt", ""):
     prompt = st.session_state.selected_prompt
     st.session_state.selected_prompt = ""
+    # Immediately hide welcome and add message for example prompts
+    st.session_state.show_welcome = False
+    st.session_state.messages.append({"role": "user", "content": prompt})
 else:
     # Chat input with default Streamlit styling
     prompt = st.chat_input("Ask anything about your data...")
+    # Immediately hide welcome and add message for chat input
+    if prompt:
+        st.session_state.show_welcome = False
+        st.session_state.messages.append({"role": "user", "content": prompt})
 
 if prompt:
-    # Hide welcome screen and add user message to chat history
-    st.session_state.show_welcome = False
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    # Message already added above, proceed with processing
     
     # Display user message
     st.markdown(f"""
