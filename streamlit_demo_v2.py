@@ -436,8 +436,8 @@ if st.button("🗑️ Clear & New Chat", key="clear_new_chat_btn", help="Clear c
     st.session_state.show_welcome = True
     st.rerun()
 
-# Show welcome content only if in welcome mode AND no messages exist
-if st.session_state.show_welcome and not st.session_state.messages:
+# Show welcome content only if no messages exist (ignore show_welcome flag)
+if not st.session_state.messages:
     st.markdown("""
     <div class="welcome-container">
         <div class="welcome-title">Ask anything about your data</div>
@@ -504,9 +504,8 @@ with col2:
     send_clicked = st.button("Send", use_container_width=True, key="send_button")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Handle send button click
+# Handle send button click  
 if send_clicked and user_input:
-    st.session_state.show_welcome = False
     st.session_state.messages.append({"role": "user", "content": user_input})
     prompt = user_input
     st.session_state.chat_input = ""  # Clear input
