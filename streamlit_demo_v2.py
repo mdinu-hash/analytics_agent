@@ -528,13 +528,23 @@ if st.session_state.get("selected_prompt", ""):
 else:
     prompt = None
     
-    # Use exact same approach as working streamlit_demo.py
-    prompt = None
-
-# Chat input (outside the else block like in streamlit_demo.py)
-if prompt := st.chat_input("Ask anything about your data..."):
-    st.session_state.show_welcome = False
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    # Back to the only working mobile solution
+    col1, col2 = st.columns([8, 1])
+    with col1:
+        prompt = st.text_input("", placeholder="Ask anything about your data...", label_visibility="collapsed", key="mobile_input")
+    with col2:
+        send_button = st.button("Send", use_container_width=True, key="send_btn")
+    
+    if send_button and prompt:
+        st.session_state.show_welcome = False
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        # Clear input by updating session state
+        st.session_state.mobile_input = ""
+        st.rerun()
+    
+    # Set prompt to None if no send button clicked
+    if not (send_button and prompt):
+        prompt = None
 
 if prompt:
     # Message already added above, proceed with processing
