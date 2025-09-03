@@ -194,40 +194,7 @@ header {visibility: hidden;}
     background: inherit !important;
 }
 
-/* Chat input styling - Note: Streamlit restricts input field background customization */
-/* Make chat input area inherit background like header does */
-section[data-testid="stBottom"], 
-.stBottom,
-div[data-testid="stBottom"] > div,
-.element-container:has(.stChatInput) {
-    background: inherit !important;
-    position: sticky !important;
-    bottom: 0 !important;
-    z-index: 1000 !important;
-    display: block !important;
-    visibility: visible !important;
-}
-
-.stChatInput {
-    background: inherit !important;
-    display: block !important;
-    visibility: visible !important;
-    width: 100% !important;
-    max-width: none !important;
-}
-
-.stChatInput > div {
-    background: inherit !important;
-    display: block !important;
-    visibility: visible !important;
-    width: 100% !important;
-}
-
-.stChatInput textarea {
-    display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-}
+/* No chat input CSS - let Streamlit handle everything */
 
 /* Custom input styling without form */
 .element-container:has(input[data-testid="stTextInput"]) input {
@@ -561,14 +528,13 @@ if st.session_state.get("selected_prompt", ""):
 else:
     prompt = None
     
-    # Test original st.chat_input() to see if it works on mobile now
-    def handle_chat_submit():
-        st.session_state.show_welcome = False
+    # Use exact same approach as working streamlit_demo.py
+    prompt = None
 
-    prompt = st.chat_input("Ask anything about your data...", on_submit=handle_chat_submit)
-    
-    if prompt:
-        st.session_state.messages.append({"role": "user", "content": prompt})
+# Chat input (outside the else block like in streamlit_demo.py)
+if prompt := st.chat_input("Ask anything about your data..."):
+    st.session_state.show_welcome = False
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
 if prompt:
     # Message already added above, proceed with processing
