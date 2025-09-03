@@ -497,16 +497,6 @@ if st.session_state.get("selected_prompt", ""):
     st.session_state.show_welcome = False
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-# Define callback function for immediate welcome screen hiding
-def handle_chat_submit():
-    st.session_state.show_welcome = False
-
-# Use columns to constrain chat input width (similar to example questions container)
-col1, col2, col3 = st.columns([1, 2, 1])  # Center column for input
-with col2:
-    if prompt := st.chat_input("Ask anything about your data...", on_submit=handle_chat_submit):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-
 if prompt:
     # Message already added above, proceed with processing
     
@@ -609,3 +599,14 @@ if prompt:
         </div>
         """, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": error_msg})
+
+# Define callback function for immediate welcome screen hiding
+def handle_chat_submit():
+    st.session_state.show_welcome = False
+
+# Chat input at bottom - appears in same position during welcome and chat phases
+col1, col2, col3 = st.columns([1, 2, 1])  # Center column for input
+with col2:
+    if prompt := st.chat_input("Ask anything about your data...", on_submit=handle_chat_submit):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.rerun()
