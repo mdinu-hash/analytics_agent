@@ -222,6 +222,48 @@ div[data-testid="stBottom"] > div,
     opacity: 1 !important;
 }
 
+/* Custom form input styling */
+div[data-testid="stForm"] {
+    background: inherit !important;
+    border: none !important;
+    padding: 24px !important;
+    position: sticky !important;
+    bottom: 0 !important;
+    z-index: 1000 !important;
+}
+
+div[data-testid="stForm"] input[type="text"] {
+    border: 1px solid #d1d5db !important;
+    border-radius: 12px !important;
+    padding: 14px 16px !important;
+    font-size: 16px !important;
+    background: white !important;
+    min-height: 48px !important;
+    font-family: 'Maven Pro', sans-serif !important;
+}
+
+div[data-testid="stForm"] input[type="text"]:focus {
+    border-color: #8b5cf6 !important;
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1) !important;
+    outline: none !important;
+}
+
+div[data-testid="stForm"] button {
+    border-radius: 12px !important;
+    background: #8b5cf6 !important;
+    color: white !important;
+    border: none !important;
+    min-height: 48px !important;
+    font-size: 16px !important;
+    font-weight: 600 !important;
+    font-family: 'Maven Pro', sans-serif !important;
+    cursor: pointer !important;
+}
+
+div[data-testid="stForm"] button:hover {
+    background: #7c3aed !important;
+}
+
 /* Sidebar elements */
 .stButton > button {
     font-family: 'Maven Pro', sans-serif;
@@ -373,22 +415,37 @@ div[data-testid="stBottom"] > div,
         padding: 16px 0;
     }
     
-    /* Force chat input visibility on mobile */
-    section[data-testid="stBottom"], 
-    .stBottom,
-    div[data-testid="stBottom"] > div,
-    .element-container:has(.stChatInput),
-    .stChatInput,
-    .stChatInput > div,
-    .stChatInput > div > div,
-    .stChatInput textarea {
-        display: block !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        height: auto !important;
-        min-height: 40px !important;
-        position: relative !important;
-        z-index: 9999 !important;
+    /* Custom form input styling for mobile */
+    div[data-testid="stForm"] {
+        background: inherit !important;
+        border: none !important;
+        padding: 16px !important;
+        position: sticky !important;
+        bottom: 0 !important;
+        z-index: 1000 !important;
+    }
+    
+    div[data-testid="stForm"] input[type="text"] {
+        border: 1px solid #d1d5db !important;
+        border-radius: 12px !important;
+        padding: 12px 16px !important;
+        font-size: 14px !important;
+        background: white !important;
+        min-height: 44px !important;
+    }
+    
+    div[data-testid="stForm"] button {
+        border-radius: 12px !important;
+        background: #8b5cf6 !important;
+        color: white !important;
+        border: none !important;
+        min-height: 44px !important;
+        font-size: 14px !important;
+        font-weight: 600 !important;
+    }
+    
+    div[data-testid="stForm"] button:hover {
+        background: #7c3aed !important;
     }
 }
 </style>
@@ -467,10 +524,6 @@ for message in st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
-# Define callback function for chat input
-def handle_chat_submit():
-    st.session_state.show_welcome = False
-
 # Check if example prompt was selected and process it
 if st.session_state.get("selected_prompt", ""):
     prompt = st.session_state.selected_prompt
@@ -479,11 +532,24 @@ if st.session_state.get("selected_prompt", ""):
     st.session_state.show_welcome = False
     st.session_state.messages.append({"role": "user", "content": prompt})
 else:
-    # Chat input with callback for immediate welcome screen hiding
-    prompt = st.chat_input("Ask anything about your data...", on_submit=handle_chat_submit)
-    # Add message to chat history if prompt exists
-    if prompt:
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    prompt = None
+    
+    # Custom chat input using form for better mobile compatibility
+    with st.form(key="chat_form", clear_on_submit=True):
+        st.markdown("""
+        <div style="background: inherit; padding: 20px 0; position: sticky; bottom: 0; z-index: 1000;">
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([8, 1])
+        with col1:
+            prompt = st.text_input("", placeholder="Ask anything about your data...", label_visibility="collapsed", key="mobile_input")
+        with col2:
+            send_button = st.form_submit_button("Send", use_container_width=True)
+        
+        if send_button and prompt:
+            st.session_state.show_welcome = False
+            st.session_state.messages.append({"role": "user", "content": prompt})
 
 if prompt:
     # Message already added above, proceed with processing
