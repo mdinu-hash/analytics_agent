@@ -197,18 +197,29 @@ div[data-testid="stBottom"] > div,
     position: sticky !important;
     bottom: 0 !important;
     z-index: 1000 !important;
+    display: block !important;
+    visibility: visible !important;
 }
 
 .stChatInput {
     background: inherit !important;
     display: block !important;
     visibility: visible !important;
+    width: 100% !important;
+    max-width: none !important;
 }
 
 .stChatInput > div {
     background: inherit !important;
     display: block !important;
     visibility: visible !important;
+    width: 100% !important;
+}
+
+.stChatInput textarea {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
 }
 
 /* Sidebar elements */
@@ -360,6 +371,24 @@ div[data-testid="stBottom"] > div,
     }
     .ai-message, .user-message {
         padding: 16px 0;
+    }
+    
+    /* Force chat input visibility on mobile */
+    section[data-testid="stBottom"], 
+    .stBottom,
+    div[data-testid="stBottom"] > div,
+    .element-container:has(.stChatInput),
+    .stChatInput,
+    .stChatInput > div,
+    .stChatInput > div > div,
+    .stChatInput textarea {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        height: auto !important;
+        min-height: 40px !important;
+        position: relative !important;
+        z-index: 9999 !important;
     }
 }
 </style>
