@@ -222,17 +222,8 @@ div[data-testid="stBottom"] > div,
     opacity: 1 !important;
 }
 
-/* Custom form input styling */
-div[data-testid="stForm"] {
-    background: inherit !important;
-    border: none !important;
-    padding: 24px !important;
-    position: sticky !important;
-    bottom: 0 !important;
-    z-index: 1000 !important;
-}
-
-div[data-testid="stForm"] input[type="text"] {
+/* Custom input styling without form */
+.element-container:has(input[data-testid="stTextInput"]) input {
     border: 1px solid #d1d5db !important;
     border-radius: 12px !important;
     padding: 14px 16px !important;
@@ -242,13 +233,14 @@ div[data-testid="stForm"] input[type="text"] {
     font-family: 'Maven Pro', sans-serif !important;
 }
 
-div[data-testid="stForm"] input[type="text"]:focus {
+.element-container:has(input[data-testid="stTextInput"]) input:focus {
     border-color: #8b5cf6 !important;
     box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1) !important;
     outline: none !important;
 }
 
-div[data-testid="stForm"] button {
+/* Send button styling */
+button[key="send_btn"] {
     border-radius: 12px !important;
     background: #8b5cf6 !important;
     color: white !important;
@@ -260,7 +252,7 @@ div[data-testid="stForm"] button {
     cursor: pointer !important;
 }
 
-div[data-testid="stForm"] button:hover {
+button[key="send_btn"]:hover {
     background: #7c3aed !important;
 }
 
@@ -326,10 +318,7 @@ div[data-testid="stForm"] button:hover {
 
 /* Tablets (768px and below) */
 @media (max-width: 768px) {
-    /* Hide sidebar on mobile/tablet */
-    .stSidebar, [data-testid="stSidebar"] {
-        display: none !important;
-    }
+    /* Allow sidebar to be collapsible on tablet - remove display:none */
     .header-title {
         font-size: 20px;
     }
@@ -370,10 +359,7 @@ div[data-testid="stForm"] button:hover {
 
 /* Mobile phones (480px and below) */
 @media (max-width: 480px) {
-    /* Hide sidebar on mobile */
-    .stSidebar, [data-testid="stSidebar"] {
-        display: none !important;
-    }
+    /* Allow sidebar to be collapsible on mobile - remove display:none */
     .header-title {
         font-size: 18px;
     }
@@ -415,17 +401,8 @@ div[data-testid="stForm"] button:hover {
         padding: 16px 0;
     }
     
-    /* Custom form input styling for mobile */
-    div[data-testid="stForm"] {
-        background: inherit !important;
-        border: none !important;
-        padding: 16px !important;
-        position: sticky !important;
-        bottom: 0 !important;
-        z-index: 1000 !important;
-    }
-    
-    div[data-testid="stForm"] input[type="text"] {
+    /* Mobile input styling */
+    .element-container:has(input[data-testid="stTextInput"]) input {
         border: 1px solid #d1d5db !important;
         border-radius: 12px !important;
         padding: 12px 16px !important;
@@ -434,7 +411,7 @@ div[data-testid="stForm"] button:hover {
         min-height: 44px !important;
     }
     
-    div[data-testid="stForm"] button {
+    button[key="send_btn"] {
         border-radius: 12px !important;
         background: #8b5cf6 !important;
         color: white !important;
@@ -444,8 +421,15 @@ div[data-testid="stForm"] button:hover {
         font-weight: 600 !important;
     }
     
-    div[data-testid="stForm"] button:hover {
+    button[key="send_btn"]:hover {
         background: #7c3aed !important;
+    }
+    
+    /* Make prompt examples much smaller on mobile */
+    .example-prompt-btn {
+        font-size: 11px !important;
+        padding: 8px 12px !important;
+        line-height: 1.3 !important;
     }
 }
 </style>
@@ -534,22 +518,24 @@ if st.session_state.get("selected_prompt", ""):
 else:
     prompt = None
     
-    # Custom chat input using form for better mobile compatibility
-    with st.form(key="chat_form", clear_on_submit=True):
-        st.markdown("""
-        <div style="background: inherit; padding: 20px 0; position: sticky; bottom: 0; z-index: 1000;">
-        </div>
-        """, unsafe_allow_html=True)
-        
-        col1, col2 = st.columns([8, 1])
-        with col1:
-            prompt = st.text_input("", placeholder="Ask anything about your data...", label_visibility="collapsed", key="mobile_input")
-        with col2:
-            send_button = st.form_submit_button("Send", use_container_width=True)
-        
-        if send_button and prompt:
-            st.session_state.show_welcome = False
-            st.session_state.messages.append({"role": "user", "content": prompt})
+    # Custom chat input without form to avoid submit message
+    st.markdown("""
+    <div style="background: inherit; padding: 20px 0; position: sticky; bottom: 0; z-index: 1000;">
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([8, 1])
+    with col1:
+        prompt = st.text_input("", placeholder="Ask anything about your data...", label_visibility="collapsed", key="mobile_input")
+    with col2:
+        send_button = st.button("Send", use_container_width=True, key="send_btn")
+    
+    if send_button and prompt:
+        st.session_state.show_welcome = False
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        # Clear input by updating session state
+        st.session_state.mobile_input = ""
+        st.rerun()
 
 if prompt:
     # Message already added above, proceed with processing
