@@ -8,6 +8,13 @@ import threading
 import queue
 import sys
 
+# Configure page with collapsed sidebar by default
+st.set_page_config(
+    page_title="Growth Analytics Agent",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
 # Add the current directory to Python path to ensure imports work
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
@@ -425,11 +432,11 @@ button[key="send_btn"]:hover {
         background: #7c3aed !important;
     }
     
-    /* Make prompt examples much smaller on mobile */
+    /* Make prompt examples much smaller on mobile - smaller than welcome title (20px) */
     .example-prompt-btn {
-        font-size: 11px !important;
-        padding: 8px 12px !important;
-        line-height: 1.3 !important;
+        font-size: 9px !important;
+        padding: 6px 10px !important;
+        line-height: 1.2 !important;
     }
 }
 </style>
