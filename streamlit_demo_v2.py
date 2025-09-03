@@ -275,6 +275,11 @@ button[key="send_btn"]:hover {
     background: #f3f4f6 !important;
 }
 
+/* Hide mobile New Chat button on desktop */
+button[key="mobile_new_chat_btn"] {
+    display: none !important;
+}
+
 /* Loading animation */
 .loading-dots {
     display: flex;
@@ -366,7 +371,26 @@ button[key="send_btn"]:hover {
 
 /* Mobile phones (480px and below) */
 @media (max-width: 480px) {
-    /* Allow sidebar to be collapsible on mobile - remove display:none */
+    /* Hide sidebar completely on mobile */
+    .stSidebar, [data-testid="stSidebar"] {
+        display: none !important;
+    }
+    
+    /* Show mobile New Chat button only on mobile */
+    button[key="mobile_new_chat_btn"] {
+        display: block !important;
+        background: #ffffff !important;
+        border: 1px solid #e5e7eb !important;
+        color: #374151 !important;
+        font-size: 12px !important;
+        padding: 8px 12px !important;
+        border-radius: 8px !important;
+        font-family: 'Maven Pro', sans-serif !important;
+    }
+    
+    button[key="mobile_new_chat_btn"]:hover {
+        background: #f3f4f6 !important;
+    }
     .header-title {
         font-size: 18px;
     }
@@ -459,13 +483,25 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # Main content area
-# Header
-st.markdown("""
-<div class="main-header">
-    <div class="header-title">Growth Analytics Agent</div>
-    <div class="dataset-badge">Amazon Reviews (2002-2023)</div>
-</div>
-""", unsafe_allow_html=True)
+# Header with mobile New Chat button
+col1, col2 = st.columns([1, 6])
+
+# Mobile-only New Chat button in top left
+with col1:
+    # Only show on mobile (we'll hide with CSS on desktop)
+    if st.button("+ New chat", key="mobile_new_chat_btn", help="Start a new conversation"):
+        st.session_state.messages = []
+        st.session_state.thread_id = str(uuid.uuid4())
+        st.session_state.show_welcome = True
+        st.rerun()
+
+with col2:
+    st.markdown("""
+    <div class="main-header">
+        <div class="header-title">Growth Analytics Agent</div>
+        <div class="dataset-badge">Amazon Reviews (2002-2023)</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # Show welcome content only if in welcome mode AND no messages exist
 if st.session_state.show_welcome and not st.session_state.messages:
@@ -525,24 +561,14 @@ if st.session_state.get("selected_prompt", ""):
 else:
     prompt = None
     
-    # Custom chat input without form to avoid submit message
-    st.markdown("""
-    <div style="background: inherit; padding: 20px 0; position: sticky; bottom: 0; z-index: 1000;">
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2 = st.columns([8, 1])
-    with col1:
-        prompt = st.text_input("", placeholder="Ask anything about your data...", label_visibility="collapsed", key="mobile_input")
-    with col2:
-        send_button = st.button("Send", use_container_width=True, key="send_btn")
-    
-    if send_button and prompt:
+    # Test original st.chat_input() to see if it works on mobile now
+    def handle_chat_submit():
         st.session_state.show_welcome = False
+
+    prompt = st.chat_input("Ask anything about your data...", on_submit=handle_chat_submit)
+    
+    if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
-        # Clear input by updating session state
-        st.session_state.mobile_input = ""
-        st.rerun()
 
 if prompt:
     # Message already added above, proceed with processing
