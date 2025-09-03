@@ -8,11 +8,10 @@ import threading
 import queue
 import sys
 
-# Configure page with collapsed sidebar by default
+# Configure page without sidebar
 st.set_page_config(
     page_title="Growth Analytics Agent",
-    layout="wide",
-    initial_sidebar_state="collapsed"
+    layout="wide"
 )
 
 # Add the current directory to Python path to ensure imports work
@@ -230,6 +229,13 @@ button[key="send_btn"]:hover {
     background: #7c3aed !important;
 }
 
+/* Input container to match example prompts width */
+.input-container {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 20px 0;
+}
+
 /* Sidebar elements */
 .stButton > button {
     font-family: 'Maven Pro', sans-serif;
@@ -242,10 +248,12 @@ button[key="send_btn"]:hover {
     background: #f3f4f6 !important;
 }
 
-/* Hide mobile New Chat button on desktop */
-button[key="mobile_new_chat_btn"] {
+/* Hide sidebar completely on all devices */
+.stSidebar, [data-testid="stSidebar"] {
     display: none !important;
 }
+
+/* Remove unused mobile button CSS */
 
 /* Loading animation */
 .loading-dots {
@@ -297,7 +305,6 @@ button[key="mobile_new_chat_btn"] {
 
 /* Tablets (768px and below) */
 @media (max-width: 768px) {
-    /* Allow sidebar to be collapsible on tablet - remove display:none */
     .header-title {
         font-size: 20px;
     }
@@ -338,26 +345,6 @@ button[key="mobile_new_chat_btn"] {
 
 /* Mobile phones (480px and below) */
 @media (max-width: 480px) {
-    /* Hide sidebar completely on mobile */
-    .stSidebar, [data-testid="stSidebar"] {
-        display: none !important;
-    }
-    
-    /* Show mobile New Chat button only on mobile */
-    button[key="mobile_new_chat_btn"] {
-        display: block !important;
-        background: #ffffff !important;
-        border: 1px solid #e5e7eb !important;
-        color: #374151 !important;
-        font-size: 12px !important;
-        padding: 8px 12px !important;
-        border-radius: 8px !important;
-        font-family: 'Maven Pro', sans-serif !important;
-    }
-    
-    button[key="mobile_new_chat_btn"]:hover {
-        background: #f3f4f6 !important;
-    }
     .header-title {
         font-size: 18px;
     }
@@ -433,42 +420,21 @@ button[key="mobile_new_chat_btn"] {
 </style>
 """, unsafe_allow_html=True)
 
-# Sidebar with ChatGPT-style dark theme
-with st.sidebar:
-    # New Chat button with functionality
-    if st.button("+ New chat", key="new_chat_btn", use_container_width=True):
-        st.session_state.messages = []
-        st.session_state.thread_id = str(uuid.uuid4())
-        st.session_state.show_welcome = True
-        st.rerun()
-    
-    # Chat history placeholder
-    st.markdown("""
-    <div style="padding: 16px; text-align: center; margin-top: 40px; opacity: 0.5;">
-        <span style="font-size: 12px; color: #64748b;">Previous chats will appear here</span>
-    </div>
-    """, unsafe_allow_html=True)
-
 # Main content area
-# Header with mobile New Chat button
-col1, col2 = st.columns([1, 6])
+# Header section
+st.markdown("""
+<div class="main-header">
+    <div class="header-title">Growth Analytics Agent</div>
+    <div class="dataset-badge">Amazon Reviews (2002-2023)</div>
+</div>
+""", unsafe_allow_html=True)
 
-# Mobile-only New Chat button in top left
-with col1:
-    # Only show on mobile (we'll hide with CSS on desktop)
-    if st.button("+ New chat", key="mobile_new_chat_btn", help="Start a new conversation"):
-        st.session_state.messages = []
-        st.session_state.thread_id = str(uuid.uuid4())
-        st.session_state.show_welcome = True
-        st.rerun()
-
-with col2:
-    st.markdown("""
-    <div class="main-header">
-        <div class="header-title">Growth Analytics Agent</div>
-        <div class="dataset-badge">Amazon Reviews (2002-2023)</div>
-    </div>
-    """, unsafe_allow_html=True)
+# Clear & New Chat button under subtitle
+if st.button("🗑️ Clear & New Chat", key="clear_new_chat_btn", help="Clear current conversation and start fresh"):
+    st.session_state.messages = []
+    st.session_state.thread_id = str(uuid.uuid4())
+    st.session_state.show_welcome = True
+    st.rerun()
 
 # Show welcome content only if in welcome mode AND no messages exist
 if st.session_state.show_welcome and not st.session_state.messages:
@@ -529,11 +495,14 @@ else:
     prompt = None
     
     # Back to the only working mobile solution
+    # Wrap input in container with same max-width as example prompts
+    st.markdown('<div class="input-container">', unsafe_allow_html=True)
     col1, col2 = st.columns([8, 1])
     with col1:
         prompt = st.text_input("", placeholder="Ask anything about your data...", label_visibility="collapsed", key="mobile_input")
     with col2:
         send_button = st.button("Send", use_container_width=True, key="send_btn")
+    st.markdown('</div>', unsafe_allow_html=True)
     
     if send_button and prompt:
         st.session_state.show_welcome = False
