@@ -494,17 +494,23 @@ if st.session_state.get("selected_prompt", ""):
 else:
     prompt = None
 
-# Input area - always show (moved outside the else block)
+# Define callback function for immediate welcome screen hiding (like the working solution)
+def handle_input_change():
+    if st.session_state.mobile_input:  # Hide welcome as soon as user types
+        st.session_state.show_welcome = False
+
+# Input area - always show with callback for immediate transition
 st.markdown('<div class="input-container">', unsafe_allow_html=True)
 col1, col2 = st.columns([8, 1])
 with col1:
-    input_prompt = st.text_input("", placeholder="Ask anything about your data...", label_visibility="collapsed", key="mobile_input")
+    input_prompt = st.text_input("", placeholder="Ask anything about your data...", 
+                                label_visibility="collapsed", key="mobile_input", 
+                                on_change=handle_input_change)
 with col2:
     send_button = st.button("Send", use_container_width=True, key="send_btn")
 st.markdown('</div>', unsafe_allow_html=True)
 
 if send_button and input_prompt:
-    st.session_state.show_welcome = False
     st.session_state.messages.append({"role": "user", "content": input_prompt})
     # Clear input by updating session state
     st.session_state.mobile_input = ""
