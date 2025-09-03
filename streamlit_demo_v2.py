@@ -484,37 +484,32 @@ for message in st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
-# Check if example prompt was selected and process it
+# Simple approach: Input always visible, handle messages cleanly
+prompt = None
+
+# Check if example prompt was selected
 if st.session_state.get("selected_prompt", ""):
     prompt = st.session_state.selected_prompt
     st.session_state.selected_prompt = ""
-    # Immediately hide welcome and add message for example prompts
     st.session_state.show_welcome = False
     st.session_state.messages.append({"role": "user", "content": prompt})
-else:
-    prompt = None
 
-# Define callback function for immediate welcome screen hiding (like the working solution)
-def handle_input_change():
-    if st.session_state.mobile_input:  # Hide welcome as soon as user types
-        st.session_state.show_welcome = False
-
-# Input area - always show with callback for immediate transition
+# Input area - ALWAYS visible regardless of state
 st.markdown('<div class="input-container">', unsafe_allow_html=True)
 col1, col2 = st.columns([8, 1])
 with col1:
-    input_prompt = st.text_input("", placeholder="Ask anything about your data...", 
-                                label_visibility="collapsed", key="mobile_input", 
-                                on_change=handle_input_change)
+    user_input = st.text_input("", placeholder="Ask anything about your data...", 
+                              label_visibility="collapsed", key="chat_input")
 with col2:
-    send_button = st.button("Send", use_container_width=True, key="send_btn")
+    send_clicked = st.button("Send", use_container_width=True, key="send_button")
 st.markdown('</div>', unsafe_allow_html=True)
 
-if send_button and input_prompt:
-    st.session_state.messages.append({"role": "user", "content": input_prompt})
-    # Clear input by updating session state
-    st.session_state.mobile_input = ""
-    prompt = input_prompt  # Set prompt for processing
+# Handle send button click
+if send_clicked and user_input:
+    st.session_state.show_welcome = False
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    prompt = user_input
+    st.session_state.chat_input = ""  # Clear input
     st.rerun()
 
 if prompt:
