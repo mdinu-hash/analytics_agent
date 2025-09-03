@@ -429,15 +429,18 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Clear & New Chat button under subtitle
+# Add some spacing before Clear & New Chat button
+st.markdown("<br>", unsafe_allow_html=True)
+
+# Clear & New Chat button with more spacing from header
 if st.button("🗑️ Clear & New Chat", key="clear_new_chat_btn", help="Clear current conversation and start fresh"):
     st.session_state.messages = []
     st.session_state.thread_id = str(uuid.uuid4())
     st.session_state.show_welcome = True
     st.rerun()
 
-# Show welcome content only if no messages exist (ignore show_welcome flag)
-if not st.session_state.messages:
+# Show welcome content based on show_welcome flag (callback sets this to False)
+if st.session_state.show_welcome and not st.session_state.messages:
     st.markdown("""
     <div class="welcome-container">
         <div class="welcome-title">Ask anything about your data</div>
@@ -498,9 +501,11 @@ if st.session_state.get("selected_prompt", ""):
 def handle_chat_submit():
     st.session_state.show_welcome = False
 
-# st.chat_input directly in main body (no containers) for mobile compatibility
-if prompt := st.chat_input("Ask anything about your data...", on_submit=handle_chat_submit):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+# Use columns to constrain chat input width (similar to example questions container)
+col1, col2, col3 = st.columns([1, 2, 1])  # Center column for input
+with col2:
+    if prompt := st.chat_input("Ask anything about your data...", on_submit=handle_chat_submit):
+        st.session_state.messages.append({"role": "user", "content": prompt})
 
 if prompt:
     # Message already added above, proceed with processing
