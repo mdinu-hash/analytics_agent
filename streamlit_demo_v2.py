@@ -439,32 +439,7 @@ if st.button("🗑️ Clear & New Chat", key="clear_new_chat_btn", help="Clear c
     st.session_state.show_welcome = True
     st.rerun()
 
-# Show welcome content based on show_welcome flag (callback sets this to False)
-if st.session_state.show_welcome and not st.session_state.messages:
-    st.markdown("""
-    <div class="welcome-container">
-        <div class="welcome-title">Ask anything about your data</div>
-        <div class="example-prompts" id="example-prompts-container">
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Initialize example prompt selection state
-    if "selected_prompt" not in st.session_state:
-        st.session_state.selected_prompt = ""
-    
-    # Example prompt buttons for functionality - 3 prompts stacked vertically and centered
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        if st.button("Why did adidas ratings decrease in early 2016?", key="btn1", help="Click to use this prompt", use_container_width=True):
-            st.session_state.selected_prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
-            st.rerun()
-        if st.button("Which companies drove rating improvements since 2022?", key="btn2", help="Click to use this prompt", use_container_width=True):
-            st.session_state.selected_prompt = "which companies contributed to the increase in ratings from September 2022?"
-            st.rerun()
-        if st.button("How did ratings change over time per company?", key="btn3", help="Click to use this prompt", use_container_width=True):
-            st.session_state.selected_prompt = "how these ratings changed over time per company?"
-            st.rerun()
+# Welcome screen section moved to after prompt processing
 
 # Display chat messages with ChatGPT-style layout
 for message in st.session_state.messages:
@@ -494,7 +469,6 @@ prompt = None
 if st.session_state.get("selected_prompt", ""):
     prompt = st.session_state.selected_prompt
     st.session_state.selected_prompt = ""
-    st.session_state.show_welcome = False
     st.session_state.messages.append({"role": "user", "content": prompt})
 
 # Check for pending prompt from chat input at bottom
@@ -610,6 +584,33 @@ if prompt:
         </div>
         """, unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": error_msg})
+
+# Show welcome content after prompt processing (so it can hide when messages exist)
+if st.session_state.show_welcome and not st.session_state.messages:
+    st.markdown("""
+    <div class="welcome-container">
+        <div class="welcome-title">Ask anything about your data</div>
+        <div class="example-prompts" id="example-prompts-container">
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Initialize example prompt selection state
+    if "selected_prompt" not in st.session_state:
+        st.session_state.selected_prompt = ""
+    
+    # Example prompt buttons for functionality - 3 prompts stacked vertically and centered
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("Why did adidas ratings decrease in early 2016?", key="btn1", help="Click to use this prompt", use_container_width=True):
+            st.session_state.selected_prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
+            st.rerun()
+        if st.button("Which companies drove rating improvements since 2022?", key="btn2", help="Click to use this prompt", use_container_width=True):
+            st.session_state.selected_prompt = "which companies contributed to the increase in ratings from September 2022?"
+            st.rerun()
+        if st.button("How did ratings change over time per company?", key="btn3", help="Click to use this prompt", use_container_width=True):
+            st.session_state.selected_prompt = "how these ratings changed over time per company?"
+            st.rerun()
 
 # Define callback function for immediate welcome screen hiding
 def handle_chat_submit():
