@@ -494,22 +494,13 @@ if st.session_state.get("selected_prompt", ""):
     st.session_state.show_welcome = False
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-# Input area - ALWAYS visible regardless of state
-st.markdown('<div class="input-container">', unsafe_allow_html=True)
-col1, col2 = st.columns([8, 1])
-with col1:
-    user_input = st.text_input("", placeholder="Ask anything about your data...", 
-                              label_visibility="collapsed", key="chat_input")
-with col2:
-    send_clicked = st.button("Send", use_container_width=True, key="send_button")
-st.markdown('</div>', unsafe_allow_html=True)
+# Define callback function for immediate welcome screen hiding
+def handle_chat_submit():
+    st.session_state.show_welcome = False
 
-# Handle send button click  
-if send_clicked and user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    prompt = user_input
-    st.session_state.chat_input = ""  # Clear input
-    st.rerun()
+# st.chat_input directly in main body (no containers) for mobile compatibility
+if prompt := st.chat_input("Ask anything about your data...", on_submit=handle_chat_submit):
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
 if prompt:
     # Message already added above, proceed with processing
