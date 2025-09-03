@@ -493,27 +493,23 @@ if st.session_state.get("selected_prompt", ""):
     st.session_state.messages.append({"role": "user", "content": prompt})
 else:
     prompt = None
-    
-    # Back to the only working mobile solution
-    # Wrap input in container with same max-width as example prompts
-    st.markdown('<div class="input-container">', unsafe_allow_html=True)
-    col1, col2 = st.columns([8, 1])
-    with col1:
-        prompt = st.text_input("", placeholder="Ask anything about your data...", label_visibility="collapsed", key="mobile_input")
-    with col2:
-        send_button = st.button("Send", use_container_width=True, key="send_btn")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    if send_button and prompt:
-        st.session_state.show_welcome = False
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        # Clear input by updating session state
-        st.session_state.mobile_input = ""
-        st.rerun()
-    
-    # Set prompt to None if no send button clicked
-    if not (send_button and prompt):
-        prompt = None
+
+# Input area - always show (moved outside the else block)
+st.markdown('<div class="input-container">', unsafe_allow_html=True)
+col1, col2 = st.columns([8, 1])
+with col1:
+    input_prompt = st.text_input("", placeholder="Ask anything about your data...", label_visibility="collapsed", key="mobile_input")
+with col2:
+    send_button = st.button("Send", use_container_width=True, key="send_btn")
+st.markdown('</div>', unsafe_allow_html=True)
+
+if send_button and input_prompt:
+    st.session_state.show_welcome = False
+    st.session_state.messages.append({"role": "user", "content": input_prompt})
+    # Clear input by updating session state
+    st.session_state.mobile_input = ""
+    prompt = input_prompt  # Set prompt for processing
+    st.rerun()
 
 if prompt:
     # Message already added above, proceed with processing
