@@ -497,6 +497,15 @@ if st.session_state.get("selected_prompt", ""):
     st.session_state.show_welcome = False
     st.session_state.messages.append({"role": "user", "content": prompt})
 
+# Check for pending prompt from chat input at bottom
+if st.session_state.get("pending_prompt"):
+    prompt = st.session_state.pending_prompt
+    del st.session_state.pending_prompt  # Clear pending prompt
+elif prompt:
+    pass  # prompt from example selection
+else:
+    prompt = None
+
 if prompt:
     # Message already added above, proceed with processing
     
@@ -607,6 +616,8 @@ def handle_chat_submit():
 # Chat input at bottom - appears in same position during welcome and chat phases
 col1, col2, col3 = st.columns([1, 2, 1])  # Center column for input
 with col2:
-    if prompt := st.chat_input("Ask anything about your data...", on_submit=handle_chat_submit):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    if new_prompt := st.chat_input("Ask anything about your data...", on_submit=handle_chat_submit):
+        st.session_state.messages.append({"role": "user", "content": new_prompt})
+        # Set prompt for processing and rerun to trigger agent response
+        st.session_state.pending_prompt = new_prompt
         st.rerun()
