@@ -540,7 +540,7 @@ with tab1:
 
     # Display chat messages with ChatGPT-style layout
     for message in st.session_state.messages:
-    if message["role"] == "user":
+        if message["role"] == "user":
             st.markdown(f"""
             <div class="user-message">
                 <div class="message-content">
@@ -549,7 +549,7 @@ with tab1:
                 </div>
             </div>
             """, unsafe_allow_html=True)
-    else:
+        else:
             st.markdown(f"""
             <div class="ai-message">
                 <div class="message-content">
