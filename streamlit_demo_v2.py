@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 import threading
 import queue
 import sys
+import pandas as pd
 
 # Configure page without sidebar
 st.set_page_config(
@@ -429,197 +430,293 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Add some spacing before Clear & New Chat button
-st.markdown("<br>", unsafe_allow_html=True)
+# Create tabs
+tab1, tab2 = st.tabs(["Agent Chat", "Tables"])
 
-# Clear & New Chat button with more spacing from header
-if st.button("🗑️ Clear & New Chat", key="clear_new_chat_btn", help="Clear current conversation and start fresh"):
-    st.session_state.messages = []
-    st.session_state.thread_id = str(uuid.uuid4())
-    st.session_state.show_welcome = True
-    st.rerun()
+# Sample data for tables
+def create_sample_data():
+    """Create sample data for each table"""
+    # Household table
+    household_data = pd.DataFrame({
+        'household_id': ['HH001', 'HH002', 'HH003'],
+        'household_tenure': [5, 12, 3],
+        'household_registration_type': ['Online', 'Branch', 'Online'],
+        'household_segment': ['Premium', 'Standard', 'Basic']
+    })
+    
+    # Advisor table
+    advisor_data = pd.DataFrame({
+        'advisor_id': ['ADV001', 'ADV002', 'ADV003'],
+        'business_line_name': ['Wealth Management', 'Investment Advisory', 'Private Banking'],
+        'account_type': ['Managed', 'Advisory', 'Discretionary'],
+        'account_custodian': ['Internal', 'External', 'Internal'],
+        'account_risk_profile': ['Conservative', 'Moderate', 'Aggressive']
+    })
+    
+    # Product table
+    product_data = pd.DataFrame({
+        'product_id': ['PROD001', 'PROD002', 'PROD003'],
+        'asset_category': ['Equity', 'Fixed Income', 'Alternative'],
+        'asset_subcategory': ['Large Cap', 'Government Bonds', 'Real Estate'],
+        'product_line': ['Mutual Funds', 'ETFs', 'REITs'],
+        'product_name': ['Growth Fund A', 'Treasury Bond ETF', 'Commercial REIT']
+    })
+    
+    # Fact account monthly table
+    fact_account_monthly_data = pd.DataFrame({
+        'snapshot_date': ['2024-01-01', '2024-01-01', '2024-01-01'],
+        'account_id': ['ACC001', 'ACC002', 'ACC003'],
+        'account_monthly_return': [0.05, -0.02, 0.03],
+        'account_net_flow': [10000, -5000, 7500],
+        'account_assets': [250000, 150000, 300000],
+        'advisor_id': ['ADV001', 'ADV002', 'ADV001'],
+        'household_id': ['HH001', 'HH002', 'HH003'],
+        'business_line_name': ['Wealth Management', 'Investment Advisory', 'Wealth Management']
+    })
+    
+    # Fact account product monthly table
+    fact_account_product_monthly_data = pd.DataFrame({
+        'snapshot_date': ['2024-01-01', '2024-01-01', '2024-01-01'],
+        'account_id': ['ACC001', 'ACC002', 'ACC003'],
+        'product_name': ['Growth Fund A', 'Treasury Bond ETF', 'Growth Fund A'],
+        'product_allocation_pct': [0.65, 0.40, 0.45]
+    })
+    
+    # Fact revenue monthly table
+    fact_revenue_monthly_data = pd.DataFrame({
+        'snapshot_date': ['2024-01-01', '2024-01-01', '2024-01-01'],
+        'account_id': ['ACC001', 'ACC002', 'ACC003'],
+        'advisor_id': ['ADV001', 'ADV002', 'ADV001'],
+        'household_id': ['HH001', 'HH002', 'HH003'],
+        'business_line_name': ['Wealth Management', 'Investment Advisory', 'Wealth Management'],
+        'gross_fee_amount': [2500, 1800, 3200],
+        'third_party_fee': [150, 120, 200],
+        'net_revenue': [2350, 1680, 3000]
+    })
+    
+    # Fact customer feedback table
+    fact_customer_feedback_data = pd.DataFrame({
+        'feedback_date': ['2024-01-15', '2024-01-20', '2024-01-25'],
+        'household_id': ['HH001', 'HH002', 'HH003'],
+        'advisor_id': ['ADV001', 'ADV002', 'ADV001'],
+        'feedback_text': ['Very satisfied with service', 'Could improve response time', 'Excellent portfolio performance'],
+        'satisfaction_score': [9, 6, 10]
+    })
+    
+    return {
+        'household': household_data,
+        'advisor': advisor_data,
+        'product': product_data,
+        'fact_account_monthly': fact_account_monthly_data,
+        'fact_account_product_monthly': fact_account_product_monthly_data,
+        'fact_revenue_monthly': fact_revenue_monthly_data,
+        'fact_customer_feedback': fact_customer_feedback_data
+    }
 
-# Welcome screen section moved to after prompt processing
+with tab2:
+    st.markdown("### Database Tables Overview")
+    st.markdown("Here are the tables available to the Growth Analytics Agent with sample data:")
+    
+    sample_data = create_sample_data()
+    
+    # Display each table
+    for table_name, data in sample_data.items():
+        st.markdown(f"#### {table_name.replace('_', ' ').title()}")
+        st.dataframe(data, use_container_width=True)
+        st.markdown("---")
 
-# Display chat messages with ChatGPT-style layout
-for message in st.session_state.messages:
+with tab1:
+    # Add some spacing before Clear & New Chat button
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Clear & New Chat button with more spacing from header
+    if st.button("🗑️ Clear & New Chat", key="clear_new_chat_btn", help="Clear current conversation and start fresh"):
+        st.session_state.messages = []
+        st.session_state.thread_id = str(uuid.uuid4())
+        st.session_state.show_welcome = True
+        st.rerun()
+
+    # Welcome screen section moved to after prompt processing
+
+    # Display chat messages with ChatGPT-style layout
+    for message in st.session_state.messages:
     if message["role"] == "user":
+            st.markdown(f"""
+            <div class="user-message">
+                <div class="message-content">
+                    <div class="message-avatar user-avatar">You</div>
+                    <div class="message-text">{message["content"]}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+            st.markdown(f"""
+            <div class="ai-message">
+                <div class="message-content">
+                    <div class="message-avatar ai-avatar">AI</div>
+                    <div class="message-text">{message["content"]}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # Simple approach: Input always visible, handle messages cleanly
+    prompt = None
+
+    # Check if example prompt was selected
+    if st.session_state.get("selected_prompt", ""):
+        prompt = st.session_state.selected_prompt
+        st.session_state.selected_prompt = ""
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
+    # Check for pending prompt from chat input at bottom
+    if st.session_state.get("pending_prompt"):
+        prompt = st.session_state.pending_prompt
+        del st.session_state.pending_prompt  # Clear pending prompt
+        # Add user message for chat input (not already added like example prompts)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+    elif prompt:
+        pass  # prompt from example selection (already added to messages)
+    else:
+            prompt = None
+
+    if prompt:
+        # Message already added above, proceed with processing
+        
+        # Display user message
         st.markdown(f"""
         <div class="user-message">
             <div class="message-content">
                 <div class="message-avatar user-avatar">You</div>
-                <div class="message-text">{message["content"]}</div>
+                <div class="message-text">{prompt}</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
+        
+        # Generate response with loading indicator
+        loading_placeholder = st.empty()
+        loading_placeholder.markdown("""
         <div class="ai-message">
             <div class="message-content">
                 <div class="message-avatar ai-avatar">AI</div>
-                <div class="message-text">{message["content"]}</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-# Simple approach: Input always visible, handle messages cleanly
-prompt = None
-
-# Check if example prompt was selected
-if st.session_state.get("selected_prompt", ""):
-    prompt = st.session_state.selected_prompt
-    st.session_state.selected_prompt = ""
-    st.session_state.messages.append({"role": "user", "content": prompt})
-
-# Check for pending prompt from chat input at bottom
-if st.session_state.get("pending_prompt"):
-    prompt = st.session_state.pending_prompt
-    del st.session_state.pending_prompt  # Clear pending prompt
-    # Add user message for chat input (not already added like example prompts)
-    st.session_state.messages.append({"role": "user", "content": prompt})
-elif prompt:
-    pass  # prompt from example selection (already added to messages)
-else:
-    prompt = None
-
-if prompt:
-    # Message already added above, proceed with processing
-    
-    # Display user message
-    st.markdown(f"""
-    <div class="user-message">
-        <div class="message-content">
-            <div class="message-avatar user-avatar">You</div>
-            <div class="message-text">{prompt}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Generate response with loading indicator
-    loading_placeholder = st.empty()
-    loading_placeholder.markdown("""
-    <div class="ai-message">
-        <div class="message-content">
-            <div class="message-avatar ai-avatar">AI</div>
-            <div class="message-text">
-                <div class="loading-dots">
-                    <div class="loading-dot"></div>
-                    <div class="loading-dot"></div>
-                    <div class="loading-dot"></div>
+                <div class="message-text">
+                    <div class="loading-dots">
+                        <div class="loading-dot"></div>
+                        <div class="loading-dot"></div>
+                        <div class="loading-dot"></div>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    try:
-        # Convert chat history to LangGraph format
-        messages_log = []
-        for msg in st.session_state.messages:  # include all messages including current prompt
-            if msg["role"] == "user":
-                messages_log.append(HumanMessage(content=msg["content"]))
-            else:
-                messages_log.append(AIMessage(content=msg["content"]))
+        """, unsafe_allow_html=True)
+        
+        try:
+            # Convert chat history to LangGraph format
+            messages_log = []
+            for msg in st.session_state.messages:  # include all messages including current prompt
+                if msg["role"] == "user":
+                    messages_log.append(HumanMessage(content=msg["content"]))
+                else:
+                    messages_log.append(AIMessage(content=msg["content"]))
 
-        # Prepare agent input state
-        if len(st.session_state.messages) == 1:  # first message (only current user message)
-            state_dict = {
-                'objects_documentation': objects_documentation,
-                'database_content': database_content,
-                'sql_dialect': sql_dialect,
-                'messages_log': messages_log,
-                'intermediate_steps': [],
-                'analytical_intent': [],
-                'current_question': prompt,
-                'current_sql_queries': [],
-                'generate_answer_details': {},
-                'llm_answer': AIMessage(content='')
-            }
-            config, st.session_state.thread_id = create_config('Run Agent', True)
-        else:  # continuation
-            state_dict = {
-                'current_question': prompt
-            }
-            config, _ = create_config('Run Agent', False, st.session_state.thread_id)
+            # Prepare agent input state
+            if len(st.session_state.messages) == 1:  # first message (only current user message)
+                state_dict = {
+                    'objects_documentation': objects_documentation,
+                    'database_content': database_content,
+                    'sql_dialect': sql_dialect,
+                    'messages_log': messages_log,
+                    'intermediate_steps': [],
+                    'analytical_intent': [],
+                    'current_question': prompt,
+                    'current_sql_queries': [],
+                    'generate_answer_details': {},
+                    'llm_answer': AIMessage(content='')
+                }
+                config, st.session_state.thread_id = create_config('Run Agent', True)
+            else:  # continuation
+                state_dict = {
+                    'current_question': prompt
+                }
+                config, _ = create_config('Run Agent', False, st.session_state.thread_id)
 
-        # Start streaming
-        progress_log = []
-        final_state = None
+            # Start streaming
+            progress_log = []
+            final_state = None
 
-        for step in graph.stream(state_dict, config=config, stream_mode="updates"):
-            step_name, output = list(step.items())[0]
-            final_state = output  # Keep most recent full state
+            for step in graph.stream(state_dict, config=config, stream_mode="updates"):
+                step_name, output = list(step.items())[0]
+                final_state = output  # Keep most recent full state
 
-            # Check for progress message from db_agent_v2.show_progress()
-            while not progress_queue.empty():
-                try:
-                    msg = progress_queue.get_nowait()
-                    progress_log.append(msg)
-                    # Show progress in loading area
-                except queue.Empty:
-                    pass
+                # Check for progress message from db_agent_v2.show_progress()
+                while not progress_queue.empty():
+                    try:
+                        msg = progress_queue.get_nowait()
+                        progress_log.append(msg)
+                        # Show progress in loading area
+                    except queue.Empty:
+                        pass
 
-        # Display final response
-        loading_placeholder.empty()
-        final_response = final_state["llm_answer"].content
-        st.markdown(f"""
-        <div class="ai-message">
-            <div class="message-content">
-                <div class="message-avatar ai-avatar">AI</div>
-                <div class="message-text">{final_response}</div>
+            # Display final response
+            loading_placeholder.empty()
+            final_response = final_state["llm_answer"].content
+            st.markdown(f"""
+            <div class="ai-message">
+                <div class="message-content">
+                    <div class="message-avatar ai-avatar">AI</div>
+                    <div class="message-text">{final_response}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.session_state.messages.append({"role": "assistant", "content": final_response})
+
+        except Exception as e:
+            loading_placeholder.empty()
+            error_msg = f"Sorry, I encountered an error: {str(e)}"
+            st.markdown(f"""
+            <div class="ai-message">
+                <div class="message-content">
+                    <div class="message-avatar ai-avatar">AI</div>
+                    <div class="message-text" style="color: #dc2626;">{error_msg}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.session_state.messages.append({"role": "assistant", "content": error_msg})
+
+    # Show welcome content after prompt processing (so it can hide when messages exist)
+    if st.session_state.show_welcome and not st.session_state.messages:
+        st.markdown("""
+        <div class="welcome-container">
+            <div class="welcome-title">Ask anything about your data</div>
+            <div class="example-prompts" id="example-prompts-container">
             </div>
         </div>
         """, unsafe_allow_html=True)
-        st.session_state.messages.append({"role": "assistant", "content": final_response})
+        
+        # Initialize example prompt selection state
+        if "selected_prompt" not in st.session_state:
+            st.session_state.selected_prompt = ""
+        
+        # Example prompt buttons for functionality - 3 prompts stacked vertically and centered
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("Why did adidas ratings decrease in early 2016?", key="btn1", help="Click to use this prompt", use_container_width=True):
+                st.session_state.selected_prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
+                st.rerun()
+            if st.button("Which companies drove rating improvements since 2022?", key="btn2", help="Click to use this prompt", use_container_width=True):
+                st.session_state.selected_prompt = "which companies contributed to the increase in ratings from September 2022?"
+                st.rerun()
+            if st.button("How did ratings change over time per company?", key="btn3", help="Click to use this prompt", use_container_width=True):
+                st.session_state.selected_prompt = "how these ratings changed over time per company?"
+                st.rerun()
 
-    except Exception as e:
-        loading_placeholder.empty()
-        error_msg = f"Sorry, I encountered an error: {str(e)}"
-        st.markdown(f"""
-        <div class="ai-message">
-            <div class="message-content">
-                <div class="message-avatar ai-avatar">AI</div>
-                <div class="message-text" style="color: #dc2626;">{error_msg}</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        st.session_state.messages.append({"role": "assistant", "content": error_msg})
+    # Define callback function for immediate welcome screen hiding
+    def handle_chat_submit():
+        st.session_state.show_welcome = False
 
-# Show welcome content after prompt processing (so it can hide when messages exist)
-if st.session_state.show_welcome and not st.session_state.messages:
-    st.markdown("""
-    <div class="welcome-container">
-        <div class="welcome-title">Ask anything about your data</div>
-        <div class="example-prompts" id="example-prompts-container">
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Initialize example prompt selection state
-    if "selected_prompt" not in st.session_state:
-        st.session_state.selected_prompt = ""
-    
-    # Example prompt buttons for functionality - 3 prompts stacked vertically and centered
-    col1, col2, col3 = st.columns([1, 2, 1])
+    # Chat input at bottom - appears in same position during welcome and chat phases
+    col1, col2, col3 = st.columns([1, 2, 1])  # Center column for input
     with col2:
-        if st.button("Why did adidas ratings decrease in early 2016?", key="btn1", help="Click to use this prompt", use_container_width=True):
-            st.session_state.selected_prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
+        if new_prompt := st.chat_input("Ask anything about your data...", on_submit=handle_chat_submit):
+            # Set prompt for processing and rerun to trigger agent response
+            st.session_state.pending_prompt = new_prompt
             st.rerun()
-        if st.button("Which companies drove rating improvements since 2022?", key="btn2", help="Click to use this prompt", use_container_width=True):
-            st.session_state.selected_prompt = "which companies contributed to the increase in ratings from September 2022?"
-            st.rerun()
-        if st.button("How did ratings change over time per company?", key="btn3", help="Click to use this prompt", use_container_width=True):
-            st.session_state.selected_prompt = "how these ratings changed over time per company?"
-            st.rerun()
-
-# Define callback function for immediate welcome screen hiding
-def handle_chat_submit():
-    st.session_state.show_welcome = False
-
-# Chat input at bottom - appears in same position during welcome and chat phases
-col1, col2, col3 = st.columns([1, 2, 1])  # Center column for input
-with col2:
-    if new_prompt := st.chat_input("Ask anything about your data...", on_submit=handle_chat_submit):
-        # Set prompt for processing and rerun to trigger agent response
-        st.session_state.pending_prompt = new_prompt
-        st.rerun()
