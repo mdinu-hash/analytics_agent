@@ -277,6 +277,41 @@ button[key="send_btn"]:hover {
     40% { transform: scale(1); }
 }
 
+/* Tab styling to match gradient background */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 8px;
+    background: transparent;
+}
+
+.stTabs [data-baseweb="tab"] {
+    background: rgba(255, 255, 255, 0.1) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    border-radius: 8px !important;
+    padding: 8px 16px !important;
+    font-weight: 500 !important;
+    font-family: 'Maven Pro', sans-serif !important;
+    backdrop-filter: blur(10px);
+}
+
+.stTabs [data-baseweb="tab"]:hover {
+    background: rgba(255, 255, 255, 0.2) !important;
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+.stTabs [aria-selected="true"] {
+    background: rgba(255, 255, 255, 0.25) !important;
+    color: #ffffff !important;
+    border-color: rgba(255, 255, 255, 0.5) !important;
+    font-weight: 600 !important;
+}
+
+.stTabs [data-baseweb="tab-panel"] {
+    background: transparent;
+    padding: 0;
+}
+
 /* Responsive design */
 
 /* Small laptops and tablets (768px - 1024px) */
