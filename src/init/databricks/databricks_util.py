@@ -4,6 +4,10 @@ import pandas as pd
 import databricks.sdk
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.sql import StatementState
+import mlflow
+import mlflow.langchain
+import datetime
+import uuid
 
 class DatabricksMetadataManager:
   """ Get/Update tables metadata stored in Databricks. 
@@ -422,3 +426,111 @@ class DatabricksMetadataManager:
         except Exception as e:
             self.logger.error(f"Failed to get database content: {e}")
             return ""
+
+def start_agent_run_mlflow(experiment_folder:str, agent_name:str, scope:str,
+                        question: str = None, is_new_thread_id: bool = False, 
+                        thread_id: str = None ) -> Dict:
+  """
+  Create or reuse a thread, create the MLflow experiment/run, and return the
+  LangGraph config plus run_id for metrics logging.
+
+  Returns a dict with kets: config, run_id.
+  """
+
+  # Enable autologging and set tracking to Databricks
+  mlflow.langchain.autolog()
+  mlflow.set_tracking_uri("databricks")
+
+  current_month_short = datetime.now().strftime("%b%Y")
+  experiment_name = f"{agent_name}_{scope}_{current_month_short}"
+  experiment_path = f"{experiment_folder}/{experiment_name}"
+
+  experiment = mlflow.get_experiment_by_name(experiment_path)
+  if experiment is None:
+      mlflow.create_experiment(experiment_path)
+  else:
+      mlflow.set_experiment(experiment_path)
+  
+  # Resolve current user 
+  try:
+      w=WorkspaceClient()
+      current_user = w.current_user.me()
+      user_name = current_user.user_name if hasattr(current_user, 'user_name') else 'unknown_user'
+  except Exception as e:
+      user_name = 'unknown_user'
+      logging.warning(f"Could not get current user: {e}")
+  
+  if is_new_thread_id or not thread_id:
+      thread_id = str(uuid.uuid4())
+  
+  date_time_now = datetime.now().strftime("%Y-%m-%d %H:%M")
+  # Naming convention is Run_AgentName_UserName_DateTime_ThreadID
+  run_name = f"Run_{agent_name}_{user_name}_{date_time_now}_{thread_id}"
+
+  # Ensure a fresh run context
+  if mlflow.active_run() is not None:
+      mlflow.end_run()
+  run = mlflow.start_run(run_name=run_name)
+
+  # basic params
+  mlflow.log_param("agent_name",agent_name)
+  mlflow.log_param("scope",scope)
+  mlflow.log_param("thread_id",thread_id)
+  mlflow.log_param("user_name",user_name)
+  mlflow.log_param("run_date",datetime.now().strftime("%Y-%m-%d"))
+  mlflow.log_param("run_time",datetime.now().strftime("%H:%M"))
+  mlflow.log_param("question",question)
+
+  config = {
+      'run_name':run_name,
+      'configurable': {'thread_id':thread_id}
+  }
+
+  return {
+      'config':config,
+      'run_id': run.info.run_id
+  }
+
+def log_agent_metrics_mlflow(result:Dict) -> None:
+    """
+    Log post-execution metrics to the active MLflow run.
+    The run remains open for additional questions in the same thread.
+    """
+
+    # attach to the existing run
+    mlflow.set_tracking_uri("databricks")
+
+    # Scenario
+    scenario = result.get('generate_answer_details',{}).get('scenario','Unknown')
+    mlflow.log_param("scenario",scenario)
+
+    # Analytical intents
+    analytical_intents = result.get('analytical_intent',[])
+    for i,intent in enumerate(analytical_intents):
+        mlflow.log_param(f"analytical_intent_{i+1}",intent)
+
+    # Sql queries and details
+    sql_queries = result.get('current_sql_queries',[])
+    for i,query_info in enumerate(sql_queries):
+        original_query = query_info.get('query','')
+        mlflow.log_param(f"sql_query_{i+1}_original",original_query)
+
+        query_result = query_info.get('result','')
+        mlflow.log_param(f"sql_query_{i+1}_result",query_result)
+
+        explanation = query_info.get('explanation','')
+        insight = query_info.get('insight','')
+        metadata = query_info.get('metadata','')
+        mlflow.log_param(f"sql_query_{i+1}_explanation",explanation)
+        mlflow.log_param(f"sql_query_{i+1}_insight",insight)
+        mlflow.log_param(f"sql_query_{i+1}_metadata",metadata)
+
+        was_refined = "Query result too large after 3 refinements" in str(query_result) or "Refinement failed" in str(explanation)
+        mlflow.log_param(f"sql_query_{i+1}_was_refined",was_refined)
+
+    # agent response
+    agent_response = result['llm_answer'].content
+    mlflow.log_param("agent_response",agent_response)
+
+
+
