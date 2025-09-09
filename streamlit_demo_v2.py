@@ -312,6 +312,18 @@ button[key="send_btn"]:hover {
     padding: 0;
 }
 
+/* Remove the red underline indicator */
+.stTabs [data-baseweb="tab-highlight"] {
+    background-color: rgba(255, 255, 255, 0.6) !important;
+    height: 2px !important;
+    border-radius: 1px !important;
+}
+
+/* Alternative: completely hide the underline indicator */
+.stTabs [data-baseweb="tab-border"] {
+    display: none !important;
+}
+
 /* Responsive design */
 
 /* Small laptops and tablets (768px - 1024px) */
