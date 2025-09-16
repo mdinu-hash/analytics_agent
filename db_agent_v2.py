@@ -143,7 +143,7 @@ def extract_analytical_intent(state:State):
 Important considerations about creating analytical intents:
     - The analytical intent will be used to create a single sql query.
     - Write it in 1 sentence.
-    - Mention just the column names, tables names, grouping levels, aggregation functions (preffered if it doesn't restrict insights) and filters from the database schema.  
+    - Mention just the column names, tables names, grouping levels, aggregation functions (preffered if it doesn't restrict insights) and filters from the database schema.     
     - If the user ask is exploratory (ex: "What can you tell me about the dataset?"), create 3-5 analytical intents. 
     - If the user ask is non-exploratory, create only one analytical intent.
     - If the user asks for statistical analysis between variables (ex correlation) do not compute the statistical metrics, instead just show a simple side by side or group summary.
@@ -281,7 +281,10 @@ def create_sql_query_or_queries(state:State):
   system_prompt = """You are a sql expert and an expert data modeler.  
 
   Your task is to create sql scripts in {sql_dialect} dialect to answer the analytical intent(s). In each sql script, use only these tables and columns you have access to:
-  {objects_documentation}
+  {objects_documentation}.
+
+  Summary of database content:
+  {database_content}.
 
   Analytical intent(s):
   {analytical_intent}
@@ -295,7 +298,7 @@ def create_sql_query_or_queries(state:State):
     - If only one SQL query is needed, just return a list with that one query.
     - GROUP BY expressions must match the non-aggregated SELECT expressions.
     - Ensure that any expression used in ORDER BY also appears in the SELECT clause.
-    - If you filter by specific text values, use trim and lowercase (ex: "where trim(lower(column_name)) = trim(lower("ValueTofilterBy")) "). 
+    - If you filter by specific text values, use trim, lowercase and pattern matching with LIKE and wildcard (ex: "where trim(lower(column_name)) LIKE trim(lower('%ValueTofilterBy%'))"). For multiple search terms, use multiple wildcards (ex: "where trim(lower(firm_name)) like '%oak%wealth%'"). 
     - Keep query performance in mind. 
       Example: Avoid CROSS JOIN by using a (scalar) subquery directly in CASE statements.
 
@@ -339,7 +342,7 @@ def create_sql_query_or_queries(state:State):
 
   chain = prompt | llm.with_structured_output(OutputAsAQuery)
 
-  result = chain.invoke({'objects_documentation':state['objects_documentation'], 'analytical_intent': state['analytical_intent'],'sql_dialect':state['sql_dialect']})
+  result = chain.invoke({'objects_documentation':state['objects_documentation'],'database_content':state['database_content'], 'analytical_intent': state['analytical_intent'],'sql_dialect':state['sql_dialect']})
   show_progress(f"✅ SQL queries created:{len(result['query'])}")
   for q in result['query']:
    state['current_sql_queries'].append( {'query': q,

@@ -410,8 +410,8 @@ def main(connection_string: str):
                 {'name': 'advisor_status', 'comment': 'Current employment status (Active/Terminated)', 'column_values': 'SELECT DISTINCT advisor_status FROM advisors ORDER BY advisor_status'},
                 {'name': 'practice_segment', 'comment': 'Size classification of advisory practice', 'column_values': 'SELECT DISTINCT practice_segment FROM advisors ORDER BY practice_segment'},
                 {'name': 'from_date', 'comment': 'Effective start date for this record version'},
-                {'name': 'to_date', 'comment': 'Effective end date for this record version'}
-            ]
+                {'name': 'to_date', 'comment': 'Effective end date for this record version','column_values': "SELECT distinct concat('filter on to_date = ','''',to_date,'''',' to identify the most recent record of the advisor_id' ) as value_description FROM public.advisors where to_date = '9999-12-31'"}            
+                ]
         },
         # Household table
         {
@@ -429,7 +429,7 @@ def main(connection_string: str):
                 {'name': 'household_status', 'comment': 'Current relationship status (Active/Terminated)', 'column_values': 'SELECT DISTINCT household_status FROM household ORDER BY household_status'},
                 {'name': 'household_advisor_id', 'comment': 'ID of the primary advisor serving this household'},
                 {'name': 'from_date', 'comment': 'Effective start date for this record version'},
-                {'name': 'to_date', 'comment': 'Effective end date for this record version'}
+                {'name': 'to_date', 'comment': 'Effective end date for this record version','column_values': "SELECT distinct concat('filter on to_date = ','''',to_date,'''',' to identify the most recent record of the household_id' ) as value_description FROM public.household where to_date = '9999-12-31'"}
             ]
         },
         # Account table
@@ -451,7 +451,7 @@ def main(connection_string: str):
                 {'name': 'closed_date', 'comment': 'Date account was closed (if applicable)'},
                 {'name': 'account_risk_profile', 'comment': 'Investment risk tolerance (Conservative, Moderate, Aggressive)', 'column_values': 'SELECT DISTINCT account_risk_profile FROM account ORDER BY account_risk_profile'},
                 {'name': 'from_date', 'comment': 'Effective start date for this record version'},
-                {'name': 'to_date', 'comment': 'Effective end date for this record version'}
+                {'name': 'to_date', 'comment': 'Effective end date for this record version','column_values': "SELECT distinct concat('filter on to_date = ','''',to_date,'''',' to identify the most recent record of the account_id' ) as value_description FROM public.account where to_date = '9999-12-31'"}
             ]
         },
         # Product table
@@ -479,7 +479,7 @@ def main(connection_string: str):
                 {'name': 'business_line_key', 'comment': 'Foreign key to business_line table'},
                 {'name': 'tier_min_aum', 'comment': 'Minimum assets under management for this fee tier'},
                 {'name': 'tier_max_aum', 'comment': 'Maximum assets under management for this fee tier'},
-                {'name': 'tier_fee_bps', 'comment': 'Fee rate in basis points (e.g., 90 = 0.90%)'}
+                {'name': 'tier_fee_bps', 'comment': 'Fee rate in basis points (e.g., 90 = 0.90%). Non-additive measure.'}
             ]
         },
         # Advisor payout rate table
@@ -490,7 +490,7 @@ def main(connection_string: str):
             'table_comment': 'Commission/payout rates by firm affiliation model',
             'column_updates': [
                 {'name': 'firm_affiliation_model', 'comment': 'Type of firm affiliation (PRIMARY KEY)', 'column_values': 'SELECT DISTINCT firm_affiliation_model FROM advisor_payout_rate ORDER BY firm_affiliation_model'},
-                {'name': 'advisor_payout_rate', 'comment': 'Percentage of revenue paid to advisor (e.g., 0.7800 = 78%)'}
+                {'name': 'advisor_payout_rate', 'comment': 'Percentage of revenue paid to advisor (e.g., 0.7800 = 78%). Non-additive measure.'}
             ]
         },
         # Fact account initial assets
@@ -501,7 +501,7 @@ def main(connection_string: str):
             'table_comment': 'Starting asset values when accounts were opened',
             'column_updates': [
                 {'name': 'account_key', 'comment': 'Foreign key to account table (PRIMARY KEY)'},
-                {'name': 'account_initial_assets', 'comment': 'Dollar value of assets when account opened'}
+                {'name': 'account_initial_assets', 'comment': 'Dollar value of assets when account opened. Semi-additive measure.'}
             ]
         },
         # Fact account monthly
@@ -513,10 +513,10 @@ def main(connection_string: str):
             'column_updates': [
                 {'name': 'snapshot_date', 'comment': 'End-of-month date for the data snapshot'},
                 {'name': 'account_key', 'comment': 'Foreign key to account table'},
-                {'name': 'account_monthly_return', 'comment': 'Monthly investment return percentage'},
-                {'name': 'account_net_flow', 'comment': 'Net deposits/withdrawals during the month'},
-                {'name': 'account_assets_previous_month', 'comment': 'Asset value at start of month'},
-                {'name': 'account_assets', 'comment': 'Asset value at end of month'},
+                {'name': 'account_monthly_return', 'comment': 'Monthly investment return percentage. Non-additive measure.'},
+                {'name': 'account_net_flow', 'comment': 'Net deposits/withdrawals during the month. Additive measure.'},
+                {'name': 'account_assets_previous_month', 'comment': 'Asset value at start of month. Semi-additive measure.'},
+                {'name': 'account_assets', 'comment': 'Asset value at end of month. Semi-additive measure.'},
                 {'name': 'advisor_key', 'comment': 'Foreign key to advisors table (current advisor)'},
                 {'name': 'household_key', 'comment': 'Foreign key to household table'},
                 {'name': 'business_line_key', 'comment': 'Foreign key to business_line table'}
@@ -532,7 +532,7 @@ def main(connection_string: str):
                 {'name': 'snapshot_date', 'comment': 'End-of-month date for the allocation snapshot'},
                 {'name': 'account_key', 'comment': 'Foreign key to account table'},
                 {'name': 'product_id', 'comment': 'Foreign key to product table'},
-                {'name': 'product_allocation_pct', 'comment': 'Percentage of account allocated to this product'}
+                {'name': 'product_allocation_pct', 'comment': 'Percentage of account allocated to this product. Non-additive measure.'}
             ]
         },
         # Fact household monthly
@@ -544,10 +544,10 @@ def main(connection_string: str):
             'column_updates': [
                 {'name': 'snapshot_date', 'comment': 'End-of-month date for the data snapshot'},
                 {'name': 'household_key', 'comment': 'Foreign key to household table'},
-                {'name': 'household_assets', 'comment': 'Total assets across all household accounts'},
+                {'name': 'household_assets', 'comment': 'Total assets across all household accounts. Semi-additive measure.'},
                 {'name': 'asset_range_bucket', 'comment': 'Categorized asset range for segmentation', 'column_values': 'SELECT DISTINCT asset_range_bucket FROM fact_household_monthly ORDER BY asset_range_bucket'},
                 {'name': 'high_net_worth_flag', 'comment': 'Boolean indicator for high-net-worth status'},
-                {'name': 'household_net_flow', 'comment': 'Net deposits/withdrawals across all accounts'}
+                {'name': 'household_net_flow', 'comment': 'Net deposits/withdrawals across all accounts. Additive measure.'}
             ]
         },
         # Fact revenue monthly
@@ -562,13 +562,13 @@ def main(connection_string: str):
                 {'name': 'advisor_key', 'comment': 'Foreign key to advisors table'},
                 {'name': 'household_key', 'comment': 'Foreign key to household table'},
                 {'name': 'business_line_key', 'comment': 'Foreign key to business_line table'},
-                {'name': 'account_assets', 'comment': 'Asset value used for fee calculation'},
-                {'name': 'fee_percentage', 'comment': 'Annual fee rate applied to assets'},
-                {'name': 'gross_fee_amount', 'comment': 'Total fee charged before deductions'},
-                {'name': 'third_party_fee', 'comment': 'Fees paid to external parties'},
-                {'name': 'advisor_payout_rate', 'comment': 'Percentage of net revenue paid to advisor'},
-                {'name': 'advisor_payout_amount', 'comment': 'Dollar amount paid to advisor'},
-                {'name': 'net_revenue', 'comment': 'Revenue retained by the firm after payouts'}
+                {'name': 'account_assets', 'comment': 'Asset value used for fee calculation. Semi-additive measure.'},
+                {'name': 'fee_percentage', 'comment': 'Annual fee rate applied to assets. Non-additive measure.'},
+                {'name': 'gross_fee_amount', 'comment': 'Total fee charged before deductions. Additive measure.'},
+                {'name': 'third_party_fee', 'comment': 'Fees paid to external parties. Additive measure.'},
+                {'name': 'advisor_payout_rate', 'comment': 'Percentage of net revenue paid to advisor. Non-additive measure.'},
+                {'name': 'advisor_payout_amount', 'comment': 'Dollar amount paid to advisor. Additive measure.'},
+                {'name': 'net_revenue', 'comment': 'Revenue retained by the firm after payouts. Additive measure.'}
             ]
         },
         # Transactions table
@@ -603,7 +603,7 @@ def main(connection_string: str):
                 {'name': 'household_key', 'comment': 'Foreign key to household table'},
                 {'name': 'advisor_key', 'comment': 'Foreign key to advisors table'},
                 {'name': 'feedback_text', 'comment': 'Customer comments (max 200 characters)'},
-                {'name': 'satisfaction_score', 'comment': 'Numeric satisfaction rating (0-100)'}
+                {'name': 'satisfaction_score', 'comment': 'Numeric satisfaction rating (0-100). Non-additive measure.'}
             ]
         }
     ]
