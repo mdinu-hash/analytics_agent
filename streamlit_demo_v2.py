@@ -11,7 +11,7 @@ import pandas as pd
 
 # Configure page without sidebar
 st.set_page_config(
-    page_title="Growth Analytics Agent",
+    page_title="Analytics Agent",
     layout="wide"
 )
 
@@ -52,7 +52,7 @@ if "show_welcome" not in st.session_state:
 
 # Configure Streamlit page
 st.set_page_config(
-    page_title="Growth Analytics Agent", 
+    page_title="Analytics Agent", 
     page_icon="🤖", 
     layout="wide",
     initial_sidebar_state="expanded"
@@ -472,8 +472,7 @@ button[key="send_btn"]:hover {
 # Header section
 st.markdown("""
 <div class="main-header">
-    <div class="header-title">Growth Analytics Agent</div>
-    <div class="dataset-badge">Amazon Reviews (2002-2023)</div>
+    <div class="header-title">Analytics Agent</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -562,7 +561,7 @@ def create_sample_data():
 
 with tab2:
     st.markdown("### Database Tables Overview")
-    st.markdown("Here are the tables available to the Growth Analytics Agent with sample data:")
+    st.markdown("Here are the tables available to the Analytics Agent with sample data:")
     
     sample_data = create_sample_data()
     
@@ -746,14 +745,11 @@ with tab1:
         # Example prompt buttons for functionality - 3 prompts stacked vertically and centered
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("Why did adidas ratings decrease in early 2016?", key="btn1", help="Click to use this prompt", use_container_width=True):
-                st.session_state.selected_prompt = "Why did adidas ratings decrease in early 2016 from january to may?"
+            if st.button("Which household segment is responsible for most revenue?", key="btn1", help="Click to use this prompt", use_container_width=True):
+                st.session_state.selected_prompt = "Which household segment is responsible for most revenue?"
                 st.rerun()
-            if st.button("Which companies drove rating improvements since 2022?", key="btn2", help="Click to use this prompt", use_container_width=True):
-                st.session_state.selected_prompt = "which companies contributed to the increase in ratings from September 2022?"
-                st.rerun()
-            if st.button("How did ratings change over time per company?", key="btn3", help="Click to use this prompt", use_container_width=True):
-                st.session_state.selected_prompt = "how these ratings changed over time per company?"
+            if st.button("For advisor ID 8, show their product usage status, total assets and payout.", key="btn2", help="Click to use this prompt", use_container_width=True):
+                st.session_state.selected_prompt = "For advisor ID 8, show their product usage status, total assets and payout."
                 st.rerun()
 
     # Define callback function for immediate welcome screen hiding
