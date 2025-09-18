@@ -103,29 +103,28 @@ def extract_analytical_intent(state:State):
   User question:
   "{question}".
 
-  *** The question is clear if ***
-  - It has a single, obvious analytical approach in terms of grouping, filtering, aggregations using available columns and relationships or past conversations.
+  *** The question is CLEAR if ***
+  - It has a single, obvious analytical approach in terms of underlying source columns, relationships or past conversations.    
+    Example: "what is the revenue?" is clear in a database schema that contains just 1 single metric that can answer the question (ex: net_revenue).
 
   - The column and metric naming in the schema clearly points to one dominant method of interpretation. 
     Example: "what is the top client?" is clear in a database schema that contains just 1 single metric that can answer the question (ex: sales_amount). 
-  
-  - The question is exploratory or open-ended.
-    Example: "What can you tell me about the dataset?".
 
-  - It refers to the evolution of metrics over time (ex last 12 months sales).  
+  - You can apply reasonable assumptions. Examples:
+    No specific time periods indicated -> assume a recent period -> CLEAR.
+    No level of details specified -> use highest aggregation level -> CLEAR.
 
   - You can deduct the analytical intent from the conversation history.
   
-  *** The question is ambigous if ***
-  - The question could be answered from different analytical intents that use different metrics, grouping, filtering or aggregations.
-    Example: Use pre-aggregated metrics vs metrics computed from aggregations across detailed tables.
+  *** The question is AMBIGUOUS if ***
+  - Different source columns would give different insights.     
 
-  - It can be answered by different metrics or metric definitions.
+  - Different metrics could answer the same question:
     Example: "What is the top client?" is ambigous in a database schema that contains multiple metrics that can answer the question (highest value of sales / highest number of sales). 
-
+ 
   Response format:
-  If clear -> "Analytical Intent Extracted".
-  If ambigous -> "Analytical Intent Ambiguous". 
+  If CLEAR -> "Analytical Intent Extracted".
+  If AMBIGUOUS -> "Analytical Intent Ambiguous". 
   """
 
   sys_prompt_clear = """Refine technically the user ask for a sql developer with access to the following database schema:
@@ -149,6 +148,8 @@ Important considerations about creating analytical intents:
     - If the user asks for statistical analysis between variables (ex correlation) do not compute the statistical metrics, instead just show a simple side by side or group summary.
 
   Important considerations about time based analysis:
+    - If the source columns are from tables showing evolutions of metrics over time, clearly specify the time range to apply the analysis on:
+      Example: If the question does not specify a time range, specify a recent period like last 12 months, last 3 months.
     - Use explicit date filters instead of relative expressions like "last 12 months". Derive actual date ranges from the feedback date ranges described in database_content. 
     - Group the specified period in time-based groups (monthly, quarterly) and compare first with last group.
 
@@ -160,55 +161,53 @@ Important considerations about creating analytical intents:
     """
 
   sys_prompt_ambiguous = """
-  Conversation history:
-  "{messages_log}".
+  The user question is ambiguous based on the database schema. 
+  Your task is to help the user clarify their intent by identifying what makes the question ambiguous & provide max 3 alternatives to choose from.
 
-  Last user prompt:
-  "{question}". 
-
-  The last user question is ambiguous from the analytical point of view, because it can be answered using different analytical intents that can be interpreted in multiple ways leading to different results.
-  
-  That is, there are different sql queries with different metadata (object names/filters/aggregations) that can answer the question.
-
-  Your task is to create all analytical intents that can possibly answer the user question using the following database schema:  
-  {objects_documentation}.             
-
-  Important considerations about creating analytical intents:
-      - Each analytical intent is for creating one single sql query.
-      - Write each analytical intent using 1 sentence.
-      - Mention specific column names, tables names as well as aggregation functions (preffered if it doesn't restrict insights) and filters from the database schema.  
-      - Mention only the useful info for creating sql queries.   
-      - Do not include redundant intents. 
-
-  Create one analytical intent for every possible pattern from the checklist that can answer the user quesion:  
-
-  ** Pattern Checklist **
-      1. filter on same table.
-        Example: select product_id from product table where avg_sales = 5.
-
-      2. Retrieve records from table A based on filter criteria from table B (assuming tables A and B are related).
-        Example: count of product_id from product table where unit_sale from sales table = 12.
-
-      3. filter records from table A based on calculated aggregations (AVG, SUM, COUNT) from table B (assuming tables A and B are related).
-        Example: count products from products table where AVG(amount) from sales table grouped by product > 100.     
-  """
-  sys_prompt_notes = """
-  Conversation history:
-  "{messages_log}".
-
-  Last user prompt:
-  "{question}". 
-  
-  The last user question is ambiguous from the analytical point of view, because it can be answered using different analytical intents that can be interpreted in multiple ways leading to different results.
-  That is, there are different sql queries with different metadata (object names/filters/aggregations) that can answer the question.
-  The sql queries can only pull data from this database schema:
+  Database schema:
   {objects_documentation}.
 
+  Conversation history:
+  "{messages_log}".
+
+  User question:
+  "{question}".      
+
+  Step 1: Identify what makes the question ambiguous.
+
+    *** The question is AMBIGUOUS if ***
+  - Different source columns would give substantially different insights:
+    Example: pre-aggregated vs computed metrics with different business logic.
+
+  - Multiple fundamentally different metrics could answer the same question:
+    Example: "What is the top client?" is ambiguous in a database schema that contains multiple metrics that can answer the question (highest value of sales / highest number of sales). 
+ 
+  - Different columns with the same underlying source data (check database schema) do NOT create ambiguity.
+
+  Step 2: Create analytical intents to choose from.
+      - Do not include redundant intents, be focused.  
+      - Each analytical intent is for creating one single sql query.
+      - Write each analytical intent using 1 sentence.
+      - Mention specific column names, tables names, aggregation functions and filters from the database schema.  
+      - Mention only the useful info for creating sql queries.    
+  """
+  sys_prompt_notes = """
+  The user question is ambiguous based on the database schema. 
+
+  Database schema:
+  {objects_documentation}.
+
+  Conversation history:
+  "{messages_log}".
+
+  User question:
+  "{question}". 
+
   The different analytical intents that make the question ambiguous are the following:
-  {analytical_intents}.         
-  
-  Your task is to create an explanation of what makes the question unclear and show the alternatives.
-  Just acknowledge why is ambiguous and mention the alternatives, nothing more.
+  {analytical_intents}.   
+
+  Create a brief explanation of what makes the question ambiguous and mention the alternatives.
+  Help the user clarify their intent by presenting the options.
   Be short, concise, explain in simple, non-technical language.
   """  
 

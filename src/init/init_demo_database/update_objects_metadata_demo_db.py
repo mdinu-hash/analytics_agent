@@ -388,10 +388,10 @@ def main(connection_string: str):
             'type': 'both',
             'schema': 'public',
             'table': 'business_line',
-            'table_comment': 'Investment product categories offered by the firm',
+            'table_comment': 'Investment product service lines offered by Capital Partners to advisors',
             'column_updates': [
-                {'name': 'business_line_key', 'comment': 'Unique identifier for business line (PRIMARY KEY)'},
-                {'name': 'business_line_name', 'comment': 'Type of investment service (Managed Portfolio, SMA, Mutual Fund Wrap, Annuity, Cash)', 'column_values': 'SELECT DISTINCT business_line_name FROM business_line ORDER BY business_line_name'}
+                {'name': 'business_line_key', 'comment': 'Unique identifier for Capital Partners business line (PRIMARY KEY)'},
+                {'name': 'business_line_name', 'comment': 'Capital Partners product service category (Managed Portfolio, SMA, Mutual Fund Wrap, Annuity, Cash)', 'column_values': 'SELECT DISTINCT business_line_name FROM business_line ORDER BY business_line_name'}
             ]
         },
         # Advisors table
@@ -404,8 +404,8 @@ def main(connection_string: str):
                 {'name': 'advisor_key', 'comment': 'Unique surrogate key (PRIMARY KEY)'},
                 {'name': 'advisor_id', 'comment': 'Natural business identifier for the advisor'},
                 {'name': 'advisor_tenure', 'comment': 'Years of experience as an advisor (1-40 years)'},
-                {'name': 'firm_name', 'comment': 'Name of the advisory firm'},
-                {'name': 'firm_affiliation_model', 'comment': 'Business model of the firm (RIA, Hybrid RIA, Broker-Dealer, etc.)', 'column_values': 'SELECT DISTINCT firm_affiliation_model FROM advisors ORDER BY firm_affiliation_model'},
+                {'name': 'firm_name', 'comment': 'Name of the firm the advisor is part of (NOT Capital Partners)'},
+                {'name': 'firm_affiliation_model', 'comment': 'Business model of the advisor firm (RIA, Hybrid RIA, Broker-Dealer, etc.)', 'column_values': 'SELECT DISTINCT firm_affiliation_model FROM advisors ORDER BY firm_affiliation_model'},
                 {'name': 'advisor_role', 'comment': 'Position within the firm (Lead Advisor, Associate, etc.)', 'column_values': 'SELECT DISTINCT advisor_role FROM advisors ORDER BY advisor_role'},
                 {'name': 'advisor_status', 'comment': 'Current employment status (Active/Terminated)', 'column_values': 'SELECT DISTINCT advisor_status FROM advisors ORDER BY advisor_status'},
                 {'name': 'practice_segment', 'comment': 'Size classification of advisory practice', 'column_values': 'SELECT DISTINCT practice_segment FROM advisors ORDER BY practice_segment'},
@@ -489,21 +489,21 @@ def main(connection_string: str):
             'table': 'advisor_payout_rate',
             'table_comment': 'Commission/payout rates by firm affiliation model',
             'column_updates': [
-                {'name': 'firm_affiliation_model', 'comment': 'Type of firm affiliation (PRIMARY KEY)', 'column_values': 'SELECT DISTINCT firm_affiliation_model FROM advisor_payout_rate ORDER BY firm_affiliation_model'},
+                {'name': 'firm_affiliation_model', 'comment': 'Type of firm affiliation (PRIMARY KEY). Source is table advisors, column firm_affiliation_model.', 'column_values': 'SELECT DISTINCT firm_affiliation_model FROM advisor_payout_rate ORDER BY firm_affiliation_model'},
                 {'name': 'advisor_payout_rate', 'comment': 'Percentage of revenue paid to advisor (e.g., 0.7800 = 78%). Non-additive measure.'}
             ]
         },
         # Fact account initial assets
-        {
-            'type': 'both',
-            'schema': 'public',
-            'table': 'fact_account_initial_assets',
-            'table_comment': 'Starting asset values when accounts were opened',
-            'column_updates': [
-                {'name': 'account_key', 'comment': 'Foreign key to account table (PRIMARY KEY)'},
-                {'name': 'account_initial_assets', 'comment': 'Dollar value of assets when account opened. Semi-additive measure.'}
-            ]
-        },
+        #{
+        #    'type': 'both',
+        #    'schema': 'public',
+        #    'table': 'fact_account_initial_assets',
+        #    'table_comment': 'Starting asset values when accounts were opened',
+        #    'column_updates': [
+        #        {'name': 'account_key', 'comment': 'Foreign key to account table (PRIMARY KEY)'},
+        #        {'name': 'account_initial_assets', 'comment': 'Dollar value of assets when account opened. Semi-additive measure.'}
+        #    ]
+        #},
         # Fact account monthly
         {
             'type': 'both',
@@ -540,14 +540,14 @@ def main(connection_string: str):
             'type': 'both',
             'schema': 'public',
             'table': 'fact_household_monthly',
-            'table_comment': 'Monthly aggregated household data',
+            'table_comment': 'Monthly aggregated household data. This table aggregates fact_account_monthly at household level.',
             'column_updates': [
                 {'name': 'snapshot_date', 'comment': 'End-of-month date for the data snapshot'},
                 {'name': 'household_key', 'comment': 'Foreign key to household table'},
-                {'name': 'household_assets', 'comment': 'Total assets across all household accounts. Semi-additive measure.'},
+                {'name': 'household_assets', 'comment': 'Total assets across all household accounts. Aggregation over table fact_account_monthly -> column account_assets. Semi-additive measure.'},
                 {'name': 'asset_range_bucket', 'comment': 'Categorized asset range for segmentation', 'column_values': 'SELECT DISTINCT asset_range_bucket FROM fact_household_monthly ORDER BY asset_range_bucket'},
                 {'name': 'high_net_worth_flag', 'comment': 'Boolean indicator for high-net-worth status'},
-                {'name': 'household_net_flow', 'comment': 'Net deposits/withdrawals across all accounts. Additive measure.'}
+                {'name': 'household_net_flow', 'comment': 'Net deposits/withdrawals across all accounts. Aggregation of table fact_account_monthly -> column account_net_flow. Additive measure.'}
             ]
         },
         # Fact revenue monthly
@@ -564,33 +564,33 @@ def main(connection_string: str):
                 {'name': 'business_line_key', 'comment': 'Foreign key to business_line table'},
                 {'name': 'account_assets', 'comment': 'Asset value used for fee calculation. Semi-additive measure.'},
                 {'name': 'fee_percentage', 'comment': 'Annual fee rate applied to assets. Non-additive measure.'},
-                {'name': 'gross_fee_amount', 'comment': 'Total fee charged before deductions. Additive measure.'},
+                {'name': 'gross_fee_amount', 'comment': 'Total fee charged before deductions. Equals to account_assets x fee_percentage. Additive measure.'},
                 {'name': 'third_party_fee', 'comment': 'Fees paid to external parties. Additive measure.'},
-                {'name': 'advisor_payout_rate', 'comment': 'Percentage of net revenue paid to advisor. Non-additive measure.'},
-                {'name': 'advisor_payout_amount', 'comment': 'Dollar amount paid to advisor. Additive measure.'},
-                {'name': 'net_revenue', 'comment': 'Revenue retained by the firm after payouts. Additive measure.'}
+                {'name': 'advisor_payout_rate', 'comment': 'Percentage of net revenue paid to advisor. Source is table advisor_payout_rate -> column advisor_payout_rate. Non-additive measure.'},
+                {'name': 'advisor_payout_amount', 'comment': 'Dollar amount paid to advisor. Equals to (gross_fee_amount - third_party_fee) x advisor_payout_rate. Additive measure.'},
+                {'name': 'net_revenue', 'comment': 'Revenue retained by Capital Partners. Equals to gross_fee_amount - third_party_fee - advisor_payout_amount. Additive measure.'}
             ]
         },
         # Transactions table
-        {
-            'type': 'both',
-            'schema': 'public',
-            'table': 'transactions',
-            'table_comment': 'Individual transaction-level data (high volume)',
-            'column_updates': [
-                {'name': 'transaction_id', 'comment': 'Unique transaction identifier (PRIMARY KEY)'},
-                {'name': 'advisor_key', 'comment': 'Foreign key to advisors table'},
-                {'name': 'account_key', 'comment': 'Foreign key to account table'},
-                {'name': 'household_key', 'comment': 'Foreign key to household table'},
-                {'name': 'business_line_key', 'comment': 'Foreign key to business_line table'},
-                {'name': 'product_id', 'comment': 'Foreign key to product table'},
-                {'name': 'transaction_date', 'comment': 'Date the transaction occurred'},
-                {'name': 'gross_revenue', 'comment': 'Revenue generated from the transaction'},
-                {'name': 'revenue_fee', 'comment': 'Fee component of the transaction'},
-                {'name': 'third_party_fee', 'comment': 'External fees associated with transaction'},
-                {'name': 'transaction_type', 'comment': 'Type of transaction (deposit, withdrawal, fee)', 'column_values': 'SELECT DISTINCT transaction_type FROM transactions ORDER BY transaction_type'}
-            ]
-        },
+        #{
+        #    'type': 'both',
+        #    'schema': 'public',
+        #    'table': 'transactions',
+        #    'table_comment': 'Individual transaction-level data (high volume)',
+        #    'column_updates': [
+        #        {'name': 'transaction_id', 'comment': 'Unique transaction identifier (PRIMARY KEY)'},
+        #        {'name': 'advisor_key', 'comment': 'Foreign key to advisors table'},
+        #        {'name': 'account_key', 'comment': 'Foreign key to account table'},
+        #        {'name': 'household_key', 'comment': 'Foreign key to household table'},
+        #        {'name': 'business_line_key', 'comment': 'Foreign key to business_line table'},
+        #        {'name': 'product_id', 'comment': 'Foreign key to product table'},
+        #        {'name': 'transaction_date', 'comment': 'Date the transaction occurred'},
+        #        {'name': 'gross_revenue', 'comment': 'Revenue generated from the transaction'},
+        #        {'name': 'revenue_fee', 'comment': 'Fee component of the transaction'},
+        #        {'name': 'third_party_fee', 'comment': 'External fees associated with transaction'},
+        #        {'name': 'transaction_type', 'comment': 'Type of transaction (deposit, withdrawal, fee)', 'column_values': 'SELECT DISTINCT transaction_type FROM transactions ORDER BY transaction_type'}
+        #    ]
+        #},
         # Fact customer feedback
         {
             'type': 'both',
