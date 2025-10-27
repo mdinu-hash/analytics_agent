@@ -347,8 +347,7 @@ def create_sql_query_or_queries(state:State):
    state['current_sql_queries'].append( {'query': q,
                                      'explanation': '', ## add it later
                                      'result':'', ## add it later
-                                     'insight': '', ## add it later
-                                     'metadata':'' ## add it later
+                                     'insight': '' ## add it later
                                       } )
   
   
@@ -382,14 +381,12 @@ def check_if_exceed_maximum_context_limit(sql_query_result):
   return False  
 
 class QueryAnalysis(TypedDict):
-    ''' complete analysis of a sql query, including its explanation, limitation and insight '''
+    ''' complete analysis of a sql query, including its explanation and insight '''
     explanation: str
-    limitation: str
     insight: str
 
 def create_query_analysis(sql_query:str, sql_query_result:str):
    ''' creates: explanation - a concise explanation of what the sql query does.
-                limitation - a concise explanation of the sql query by pointing out its limitations.
                 insight - insight from the result of the sql query.
    '''
    system_prompt = """
@@ -401,34 +398,12 @@ def create_query_analysis(sql_query:str, sql_query_result:str):
    Which yielded the following result:
    {sql_query_result}.
 
-   Provide a structured analysis with three components:
+   Provide a structured analysis with two components:
 
-   Step 1: Explanation: A concise description of what the query outputs, in one short phrase. 
+   Step 1: Explanation: A concise description of what the query outputs, in one short phrase.
                    Do not include introductory words like "The query" or "It outputs."
 
-   Step 2: Limitation: Inherent limitations or assumptions of the query based strictly on its structure and logic.
-                  Focus on:
-                  - How LIMIT, ORDER BY, GROUP BY, or JOINs may introduce assumptions
-                  - How filtering or aggregation logic may bias the output
-                  - Situations where the query might **return incomplete or misleading results due to logic only**
-                  - Cases where ORDER BY combined with LIMIT might exclude other rows with equal values (ties)
-
-                  Only describe things that follow **logically from the query**, not from the dataset itself.
-
-                  🚫 Do NOT mention:
-                  - speculate on what the user is trying to analyze
-                  - suggest what insights are missing
-                  - mention field names being correct or incorrect
-                  - mention data types, nulls, formatting, spelling, or schema correctness
-                  - mention what other attributes, columns, filters, or relationships "could have" been used
-                  - assume anything about the intent behind the query
-
-                  If the query has no structural limitations or assumptions, respond with exactly "No comments for the query".
-
-                  Respond in 1 to 3 concise sentences, or with the exact phrase above.
-   
-   Step 3: Insight: Key findings from the results, stating facts directly without technical terms.
-               - Include the limitations discovered in step 2, as long as it's different than "No comments for the query".
+   Step 2: Insight: Key findings from the results, stating facts directly without technical terms.
                - Do not mention your subjective assessment over the results.
                - Avoid technical terms like "data","dataset","table","list","provided information","query" etc.
    """
@@ -437,100 +412,6 @@ def create_query_analysis(sql_query:str, sql_query_result:str):
    chain = prompt | llm_fast.with_structured_output(QueryAnalysis)
    return chain.invoke({'sql_query':sql_query,
                         'sql_query_result':sql_query_result})   
-
-import sqlglot
-from sqlglot import parse_one, exp
-
-def extract_metadata_from_sql_query(sql_query):
-   # returns a dictionary with parsed names of tables and columns used in filters, aggregations and groupings 
-   
- ast = parse_one(sql_query)
-
- sql_query_metadata = {
-    "tables": [],
-    "filters": [],
-    "aggregations": [],
-    "groupings": []
- }
-
- # extract tables
- table_generator = ast.find_all(sqlglot.expressions.Table)
- for items in table_generator:
-    sql_query_metadata['tables'].append(items.sql())
- # remove dups
- sql_query_metadata['tables'] = list(dict.fromkeys(sql_query_metadata['tables']))
-
- # extract filters
- where_conditions = ast.find_all(sqlglot.expressions.Where)
- for item in where_conditions:
-  sql_query_metadata['filters'].append(item.this.sql())
-  # remove dups
- sql_query_metadata['filters'] = list(dict.fromkeys(sql_query_metadata['filters']))
-
- # extract aggregate functions
- funcs = ast.find_all(sqlglot.expressions.AggFunc)
- for item in funcs:
-  sql_query_metadata['aggregations'].append(item.sql())
- # remove dups
- sql_query_metadata['aggregations'] = list(dict.fromkeys(sql_query_metadata['aggregations']))
-
- # extract groupings
- groupings = ast.find_all(sqlglot.expressions.Group)
- for item in groupings:
-  groupings_flattened = item.flatten()
-  for item in groupings_flattened:
-    sql_query_metadata['groupings'].append(item.sql())
- # remove dups
- sql_query_metadata['groupings'] = list(dict.fromkeys(sql_query_metadata['groupings']))
-
- return {'tables':sql_query_metadata.get('tables'),
-         'filters':sql_query_metadata.get('filters'),
-         'aggregations':sql_query_metadata.get('aggregations'),
-         'groupings':sql_query_metadata.get('groupings'),
-          }
-
-def format_sql_metadata_explanation(tables:list=None, filters:list=None, aggregations:list=None, groupings:list=None,header :str='') -> str:
-    # creates a string explanation of the filters, tables, aggregations and groupings used by the query
-    explanation = header
-
-    if tables:
-        explanation += "\n\n🧊 Tables: • " + " • ".join(tables)
-    if filters:
-        explanation += "\n\n🔍 Filters applied: • " + " • ".join(filters)
-    if aggregations:
-        explanation += "\n\n🧮 Aggregations: • " + " • ".join(aggregations)
-    if groupings:
-        explanation += "\n\n📦 Groupings: • " + " • ".join(groupings)
-
-    return explanation.strip()
-
-def create_query_metadata(sql_query: str):
- """ creates an explanation for one single query """
-
- metadata = extract_metadata_from_sql_query(sql_query)
- return format_sql_metadata_explanation(metadata['tables'],metadata['filters'],metadata['aggregations'],metadata['groupings'])
-
-
-def create_queries_metadata(sql_queries: list[dict]):
- """ creates an explanation for multiple queries: used in the generate_answer tool """
-
- all_tables = []
- all_filters = []
-
- for q in sql_queries: 
-
-  metadata = extract_metadata_from_sql_query(q['query'])
-  all_tables.extend(metadata["tables"])
-  all_filters.extend(metadata["filters"])
-
-  # include the default min/max feedback filters if feedback table has been used and was not filtered at all
-  if all_filters:    
-     output = format_sql_metadata_explanation(filters = all_filters,header='')
-  # if no filters were applied, don't include other metadata for the sake of keeping the message simple
-  else:
-     output = ''   
-
- return output
 
 # the function checks if the query output exceeds context window limit and if yes, send the query for refinement
 
@@ -609,13 +490,11 @@ def execute_sql_query(state:State):
        # if the sql query does not exceed output context window return its result
        if not check_if_exceed_maximum_context_limit(sql_query_result):
          analysis = create_query_analysis(sql_query, sql_query_result)
-         sql_query_metadata = create_query_metadata(sql_query)   
 
          # Update state
          state['current_sql_queries'][query_index]['result'] = sql_query_result
          state['current_sql_queries'][query_index]['insight'] = analysis['insight']
          state['current_sql_queries'][query_index]['query'] = sql_query
-         state['current_sql_queries'][query_index]['metadata'] = sql_query_metadata
          state['current_sql_queries'][query_index]['explanation'] = analysis['explanation']
          break   
 
@@ -869,16 +748,10 @@ def generate_answer(state:State):
   prompt = create_prompt_template('system', sys_prompt, messages_log=True)
   llm_answer_chain = prompt | llm
 
-  if scenario == 'A': # show filters
-    final_answer_chain = { 'llm_answer': llm_answer_chain
-                         ,'input_state': RunnablePassthrough()  
-                           } | RunnableLambda (lambda x: { 'ai_message': AIMessage( content = f"{x['llm_answer'].content.strip()}\n\n{create_queries_metadata(x['input_state']['current_sql_queries'])}"
-                                                                         ,response_metadata = x['llm_answer'].response_metadata  ) } ) 
-  else: # filters not necessary
-    final_answer_chain = { 'llm_answer': llm_answer_chain
-                          , 'input_state': RunnablePassthrough() 
-                          } | RunnableLambda (lambda x: { 'ai_message': AIMessage( content = f"{x['llm_answer'].content}"
-                                                                        ,response_metadata = x['llm_answer'].response_metadata  ) } )      
+  final_answer_chain = { 'llm_answer': llm_answer_chain
+                        , 'input_state': RunnablePassthrough()
+                        } | RunnableLambda (lambda x: { 'ai_message': AIMessage( content = f"{x['llm_answer'].content}"
+                                                                      ,response_metadata = x['llm_answer'].response_metadata  ) } )      
 
   # invoke parameters based on scenario
   invoke_params = next(s['Invoke_Params'](state) for s in scenario_prompts if s['Type'] == scenario)
@@ -886,14 +759,6 @@ def generate_answer(state:State):
   result = final_answer_chain.invoke(invoke_params)
   ai_msg = result['ai_message']
 
-  # Add token count for SQL metadata if applicable
-  if scenario == 'A':
-    explanation_token_count = llm.get_num_tokens(create_queries_metadata(state['current_sql_queries']))
-    if llm_provider == 'anthropic':
-        ai_msg.response_metadata['usage']['output_tokens'] += explanation_token_count
-    else:
-        ai_msg.response_metadata['token_usage']['total_tokens'] += explanation_token_count
-  
   # Update state (common for all scenarios)
   state['llm_answer'] = ai_msg
   state['messages_log'].append(HumanMessage(state['current_question']))
