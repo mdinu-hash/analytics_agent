@@ -3,10 +3,10 @@ services:
 - name: web
   source_dir: /
   github:
-    repo: mdinu-hash/db_agent_v1
+    repo: mdinu-hash/analytics_agent
     branch: main
     deploy_on_push: true
-  run_command: streamlit run streamlit_demo_v2.py --server.port=8080 --server.address=0.0.0.0
+  run_command: streamlit run app.py --server.port=8080 --server.address=0.0.0.0
   environment_slug: python
   instance_count: 1
   instance_size_slug: basic-xxs
@@ -27,7 +27,7 @@ services:
     type: SECRET
   - key: LANGSMITH_PROJECT
     scope: RUN_TIME
-    value: "db_agent_v2"
+    value: "db_agent"
   - key: LANGSMITH_TRACING
     scope: RUN_TIME  
     value: "true"

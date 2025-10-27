@@ -19,28 +19,28 @@ st.set_page_config(
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
-# Database connection will be handled by db_agent_v2's PostgreSQL database manager
+# Database connection will be handled by agent's PostgreSQL database manager
 # No need for database download functionality as we're using PostgreSQL
 
 # Try to import agent components safely
 try:
-    # Import the individual components we need from db_agent_v2
-    import db_agent_v2
+    # Import the individual components we need from agent
+    import agent
     
     # Get the components after database manager is available
-    graph = db_agent_v2.graph
-    create_config = db_agent_v2.create_config
-    objects_documentation = db_agent_v2.objects_documentation
-    database_content = db_agent_v2.database_content
-    sql_dialect = db_agent_v2.sql_dialect
+    graph = agent.graph
+    create_config = agent.create_config
+    objects_documentation = agent.objects_documentation
+    database_content = agent.database_content
+    sql_dialect = agent.sql_dialect
     
 except Exception as e:
     st.error(f"❌ Failed to import agent: {e}")
-    st.info("Make sure db_agent_v2.py is in the same directory and the PostgreSQL connection is configured properly.")
+    st.info("Make sure agent.py is in the same directory and the PostgreSQL connection is configured properly.")
     st.stop()
 
 progress_queue = queue.Queue()
-db_agent_v2.set_progress_queue(progress_queue)
+agent.set_progress_queue(progress_queue)
 
 # Initialize session state
 if "messages" not in st.session_state:
@@ -693,7 +693,7 @@ with tab1:
                 step_name, output = list(step.items())[0]
                 final_state = output  # Keep most recent full state
 
-                # Check for progress message from db_agent_v2.show_progress()
+                # Check for progress message from agent.show_progress()
                 while not progress_queue.empty():
                     try:
                         msg = progress_queue.get_nowait()

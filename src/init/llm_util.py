@@ -83,7 +83,7 @@ def calculate_chat_history_tokens(messages_log):
                 total_tokens += msg.response_metadata['usage'].get('output_tokens', 0)
         return total_tokens
     else:
-        # For OpenAI: Use total_tokens from the last message (as in original db_agent_v1)
+        # For OpenAI: Use total_tokens from the last message
         last_msg = messages_log[-1]
         if hasattr(last_msg, 'response_metadata') and 'token_usage' in last_msg.response_metadata:
             return last_msg.response_metadata['token_usage'].get('total_tokens', 0)
