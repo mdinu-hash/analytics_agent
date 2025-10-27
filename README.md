@@ -2,7 +2,7 @@
 
 Instant Insights Through Natural Language
 
-[Try The Live Demo: https://growth-whisper-i424t.ondigitalocean.app/]
+[Try The Live Demo: https://analytics-agent-7mzj7.ondigitalocean.app/]
 
 Tired of waiting weeks for data insights? GenAI Data Copilot turns natural language into powerful database queries — delivering business answers in seconds.
 
@@ -105,5 +105,5 @@ Maintains conversation context while managing memory efficiently through intelli
 
 This demo runs in the browser (Streamlit) with a cloud-based backend, but it is fully portable to your own data infrastructure (e.g., Databricks or Azure).
 
-[Try The Live Demo: https://growth-whisper-i424t.ondigitalocean.app]
+[Try The Live Demo: https://analytics-agent-7mzj7.ondigitalocean.app/]
 
