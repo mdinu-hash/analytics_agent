@@ -642,9 +642,9 @@ scenario_A = {
     Last user prompt:
     {question}.  
 
-    Use both the raw SQL results and the extracted insights below to form your answer: {insights}. 
-    
-    Include all details from these insights.""" + '\n\n' + response_guidelines.strip(),
+    - Use both the raw SQL results and the extracted insights below to form your answer: {insights}. 
+    - Don't assume facts that are not backed up by the data in the insights.    
+    - Include all details from these insights.""" + '\n\n' + response_guidelines.strip(),
     'Invoke_Params': lambda state: {
         'messages_log': state['messages_log'],
         'question': state['current_question'],
@@ -660,6 +660,7 @@ scenario_B = {
     'Description': 'answer is in the chat history, or the question is pleasantries. With response guidelines',
     'Prompt': """ You are a decision support consultant helping users become more data-driven.
     Continue the conversation from the last user prompt. 
+    Don't assume facts that are not backed up by the data in the insights. 
     
     Conversation history:
     {messages_log}.
@@ -715,7 +716,7 @@ scenario_D = {
     
     Acknowledge what makes the question ambiguous, present different options as possible interpretations and ask the user to specify which analysis it wants.
 
-    Respond in clear, non-technical language. Be concise.""" + '\n\n' + response_guidelines.strip(),
+    """ + '\n\n' + response_guidelines.strip(),
     'Invoke_Params': lambda state: {
         'messages_log': state['messages_log'],
         'question': state['current_question'],
@@ -728,7 +729,7 @@ scenario_D = {
 scenario_prompts = [scenario_A,scenario_B,scenario_C,scenario_D]
 
 def format_sql_query_results_for_prompt (sql_queries : list[dict]) -> str:
-    
+    """ based on the current_sql_queries, creates a string like so: Insight 1: ... Raw Result of insight 1: ... Insight 2 ... etc """
     formatted_queries = []
     for query_index,q in enumerate(sql_queries):
         block = f"Insight {query_index+1}:\n{q['insight']}\n\nRaw Result of insight {query_index+1}:\n{q['result']}"
