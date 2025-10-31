@@ -235,7 +235,8 @@ class PostgresMetadataManager:
                     column_ordinal_position INTEGER,
                     relationship_key1 VARCHAR(500),
                     relationship_key2 VARCHAR(500),
-                    column_values TEXT
+                    column_values TEXT,
+                    date_range TEXT
                 );
                 '''
                 cursor.execute(create_sql)
@@ -271,7 +272,8 @@ class PostgresMetadataManager:
                             
                         col_name = row.get('column_name')
                         column_values = None
-                        
+                        date_range = None
+
                         # Execute custom query for column values if provided
                         if col_name and col_name in column_metadata_map:
                             col_meta = column_metadata_map[col_name]
@@ -288,7 +290,18 @@ class PostgresMetadataManager:
                                     column_values = ', '.join(sorted(set(distinct_values)))
                                 except Exception as e:
                                     self.logger.error(f"Failed to execute custom query for {schema}.{table}.{col_name}: {e}")
-                        
+
+                            # Execute custom query for date_range if provided
+                            date_range_query = col_meta.get('date_range')
+                            if date_range_query:
+                                try:
+                                    cursor.execute(date_range_query)
+                                    result_data = cursor.fetchone()
+                                    if result_data and result_data[0] is not None:
+                                        date_range = str(result_data[0])
+                                except Exception as e:
+                                    self.logger.error(f"Failed to execute date_range query for {schema}.{table}.{col_name}: {e}")
+
                         all_rows.append({
                             'table_schema': row.get('table_schema'),
                             'table_name': row.get('table_name'),
@@ -297,7 +310,8 @@ class PostgresMetadataManager:
                             'column_ordinal_position': row.get('ordinal_position'),
                             'relationship_key1': None,
                             'relationship_key2': None,
-                            'column_values': column_values
+                            'column_values': column_values,
+                            'date_range': date_range
                         })
                 
                 # Step 3: Map relationships to columns
@@ -324,22 +338,23 @@ class PostgresMetadataManager:
                 # Step 4: Insert all rows
                 if all_rows:
                     insert_sql = """
-                    INSERT INTO metadata_reference_table 
-                    (table_schema, table_name, column_name, table_column_documentation, 
-                     column_ordinal_position, relationship_key1, relationship_key2, column_values)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO metadata_reference_table
+                    (table_schema, table_name, column_name, table_column_documentation,
+                     column_ordinal_position, relationship_key1, relationship_key2, column_values, date_range)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
-                    
+
                     for row in all_rows:
                         cursor.execute(insert_sql, (
                             row['table_schema'],
-                            row['table_name'], 
+                            row['table_name'],
                             row['column_name'],
                             row['table_column_documentation'],
                             row['column_ordinal_position'],
                             row['relationship_key1'],
                             row['relationship_key2'],
-                            row['column_values']
+                            row['column_values'],
+                            row['date_range']
                         ))
                     
                     conn.commit()
@@ -511,7 +526,7 @@ def main(connection_string: str):
             'table': 'fact_account_monthly',
             'table_comment': 'Monthly account performance and asset data',
             'column_updates': [
-                {'name': 'snapshot_date', 'comment': 'End-of-month date for the data snapshot'},
+                {'name': 'snapshot_date', 'comment': 'End-of-month date for the data snapshot', 'date_range':"SELECT distinct concat ('account dates between ',min(snapshot_date),' and ', max(snapshot_date) ) FROM fact_account_monthly"},
                 {'name': 'account_key', 'comment': 'Foreign key to account table'},
                 {'name': 'account_monthly_return', 'comment': 'Monthly investment return percentage. Non-additive measure.'},
                 {'name': 'account_net_flow', 'comment': 'Net deposits/withdrawals during the month. Additive measure.'},
@@ -529,7 +544,7 @@ def main(connection_string: str):
             'table': 'fact_account_product_monthly',
             'table_comment': 'Monthly asset allocation by product for each account',
             'column_updates': [
-                {'name': 'snapshot_date', 'comment': 'End-of-month date for the allocation snapshot'},
+                {'name': 'snapshot_date', 'comment': 'End-of-month date for the allocation snapshot', 'date_range':"SELECT distinct concat ('product account dates between ',min(snapshot_date),' and ', max(snapshot_date) ) FROM fact_account_product_monthly"},
                 {'name': 'account_key', 'comment': 'Foreign key to account table'},
                 {'name': 'product_id', 'comment': 'Foreign key to product table'},
                 {'name': 'product_allocation_pct', 'comment': 'Percentage of account allocated to this product. Non-additive measure.'}
@@ -542,7 +557,7 @@ def main(connection_string: str):
             'table': 'fact_household_monthly',
             'table_comment': 'Monthly aggregated household data. This table aggregates fact_account_monthly at household level.',
             'column_updates': [
-                {'name': 'snapshot_date', 'comment': 'End-of-month date for the data snapshot'},
+                {'name': 'snapshot_date', 'comment': 'End-of-month date for the data snapshot', 'date_range':"SELECT distinct concat ('household dates between ',min(snapshot_date),' and ', max(snapshot_date) ) FROM fact_household_monthly"},
                 {'name': 'household_key', 'comment': 'Foreign key to household table'},
                 {'name': 'household_assets', 'comment': 'Total assets across all household accounts. Aggregation over table fact_account_monthly -> column account_assets. Semi-additive measure.'},
                 {'name': 'asset_range_bucket', 'comment': 'Categorized asset range for segmentation', 'column_values': 'SELECT DISTINCT asset_range_bucket FROM fact_household_monthly ORDER BY asset_range_bucket'},
@@ -557,7 +572,7 @@ def main(connection_string: str):
             'table': 'fact_revenue_monthly',
             'table_comment': 'Monthly fee and revenue calculations',
             'column_updates': [
-                {'name': 'snapshot_date', 'comment': 'End-of-month date for revenue calculation'},
+                {'name': 'snapshot_date', 'comment': 'End-of-month date for revenue calculation', 'date_range':"SELECT distinct concat ('revenue dates between ',min(snapshot_date),' and ', max(snapshot_date) ) FROM fact_revenue_monthly"},
                 {'name': 'account_key', 'comment': 'Foreign key to account table'},
                 {'name': 'advisor_key', 'comment': 'Foreign key to advisors table'},
                 {'name': 'household_key', 'comment': 'Foreign key to household table'},
@@ -599,7 +614,7 @@ def main(connection_string: str):
             'table_comment': 'Client satisfaction and feedback data',
             'column_updates': [
                 {'name': 'feedback_id', 'comment': 'Unique feedback record identifier (PRIMARY KEY)'},
-                {'name': 'feedback_date', 'comment': 'Date feedback was collected'},
+                {'name': 'feedback_date', 'comment': 'Date feedback was collected', 'date_range':"SELECT distinct concat ('feedback dates between ',min(feedback_date),' and ', max(feedback_date) ) FROM fact_customer_feedback"},
                 {'name': 'household_key', 'comment': 'Foreign key to household table'},
                 {'name': 'advisor_key', 'comment': 'Foreign key to advisors table'},
                 {'name': 'feedback_text', 'comment': 'Customer comments (max 200 characters)'},

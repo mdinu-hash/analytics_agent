@@ -22,6 +22,8 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 import queue
+import sqlglot
+from sqlglot import parse_one
 
 # Import initialization components
 from src.init.initialization import (
@@ -411,7 +413,85 @@ def create_query_analysis(sql_query:str, sql_query_result:str):
    prompt = create_prompt_template('system', system_prompt)
    chain = prompt | llm_fast.with_structured_output(QueryAnalysis)
    return chain.invoke({'sql_query':sql_query,
-                        'sql_query_result':sql_query_result})   
+                        'sql_query_result':sql_query_result})
+
+
+def extract_tables_from_sql(sql_query: str) -> list[str]:
+    """Parse SQL to extract table names"""
+    try:
+        ast = parse_one(sql_query, dialect=sql_dialect)
+        tables = []
+        for items in ast.find_all(sqlglot.expressions.Table):
+            tables.append(items.sql())
+        return list(dict.fromkeys(tables))
+    except:
+        import re
+        tables = re.findall(r'FROM\s+(\w+)|JOIN\s+(\w+)', sql_query, re.IGNORECASE)
+        return list(set([t for group in tables for t in group if t]))
+
+
+def get_date_ranges_for_tables(sql_query: str) -> list[str]:
+    """Fetch date ranges for tables used in SQL query. Returns list of date range strings."""
+    tables = extract_tables_from_sql(sql_query)
+
+    if not tables:
+        return []
+
+    db_manager = get_database_manager()
+    try:
+        # Build WHERE IN clause with quoted table names
+        table_list = ', '.join([f"'{t}'" for t in tables])
+        query = f"SELECT DISTINCT date_range FROM metadata_reference_table WHERE table_name IN ({table_list}) AND date_range IS NOT NULL"
+
+        result_df = db_manager._execute_sql(query)
+
+        if result_df.empty:
+            return []
+
+        return result_df['date_range'].tolist()
+    except Exception as e:
+        return []
+
+
+class QueryExplanation(TypedDict):
+    explanation: Annotated[list[str], "2-5 concise assumptions/highlights"]
+
+
+def create_query_explanation(sql_query: str) -> dict:
+    """Generate explanation highlights for query assumptions"""
+
+    system_prompt = """You are provided with the following SQL query:
+{sql_query}.
+Your task is to highlight parts of this query to a non-technical user, including only the highlight types below if they exist.
+
+Guidelines:
+- Use only bullet points, max 0-3 bullet points, keep just the most important info.
+- Keep every bullet very concise, very few words.
+- Don't include filters applied to current records.
+- Don't include highlights that are not part of the list below. 
+
+List of highlight types:
+  - filters applied. 
+    Ex: “excluded inactive affiliates”.
+  - Show time range of the source table (min/max dates) if the source table for the query has data over time. 
+    Ex: “account snapshot dates between 2021 and 2022”
+  - TOP X rows limits the result.
+    Ex: "Results limited to top 10 affiliates by assets”  
+    """
+
+    prompt = create_prompt_template('system', system_prompt)
+    chain = prompt | llm_fast.with_structured_output(QueryExplanation)
+
+    llm_explanation = chain.invoke({
+        'sql_query': sql_query
+    })
+
+    # Append date ranges
+    date_ranges = get_date_ranges_for_tables(sql_query)
+    combined_explanation = llm_explanation['explanation'] + date_ranges
+
+    return {'explanation': combined_explanation}
+
 
 # the function checks if the query output exceeds context window limit and if yes, send the query for refinement
 
@@ -490,12 +570,13 @@ def execute_sql_query(state:State):
        # if the sql query does not exceed output context window return its result
        if not check_if_exceed_maximum_context_limit(sql_query_result):
          analysis = create_query_analysis(sql_query, sql_query_result)
+         explanation = create_query_explanation(sql_query)
 
          # Update state
          state['current_sql_queries'][query_index]['result'] = sql_query_result
          state['current_sql_queries'][query_index]['insight'] = analysis['insight']
          state['current_sql_queries'][query_index]['query'] = sql_query
-         state['current_sql_queries'][query_index]['explanation'] = analysis['explanation']
+         state['current_sql_queries'][query_index]['explanation'] = explanation['explanation']
          break   
 
        # if the sql query exceeds output context window and there is more room for iterations, refine the query
@@ -736,6 +817,21 @@ def format_sql_query_results_for_prompt (sql_queries : list[dict]) -> str:
         formatted_queries.append(block)
     return "\n\n".join(formatted_queries)
 
+
+def format_sql_query_explanations_for_prompt(sql_queries: list[dict]) -> str:
+    """Format explanations into single section"""
+    all_explanations = []
+    for q in sql_queries:
+        if q.get('explanation') and isinstance(q['explanation'], list):
+            all_explanations.extend(q['explanation'])
+
+    if not all_explanations:
+        return ""
+
+    unique_explanations = list(dict.fromkeys(all_explanations))
+    return "\n\n**Key Assumptions:**\n" + "\n".join([f"• {e}" for e in unique_explanations])
+
+
 ## create a function that generates the agent answer based on sql query result
 
 @tool
@@ -749,10 +845,15 @@ def generate_answer(state:State):
   prompt = create_prompt_template('system', sys_prompt, messages_log=True)
   llm_answer_chain = prompt | llm
 
-  final_answer_chain = { 'llm_answer': llm_answer_chain
-                        , 'input_state': RunnablePassthrough()
-                        } | RunnableLambda (lambda x: { 'ai_message': AIMessage( content = f"{x['llm_answer'].content}"
-                                                                      ,response_metadata = x['llm_answer'].response_metadata  ) } )      
+  def create_final_message(llm_response):
+      base_content = llm_response.content
+      explanation_section = ""
+      if state.get('generate_answer_details', {}).get('scenario') == 'A':
+          explanation_section = format_sql_query_explanations_for_prompt(state['current_sql_queries'])
+      return {'ai_message': AIMessage(content=base_content + explanation_section,
+                                     response_metadata=llm_response.response_metadata)}
+
+  final_answer_chain = llm_answer_chain | RunnableLambda(create_final_message)      
 
   # invoke parameters based on scenario
   invoke_params = next(s['Invoke_Params'](state) for s in scenario_prompts if s['Type'] == scenario)

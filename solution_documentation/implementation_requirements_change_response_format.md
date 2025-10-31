@@ -3,7 +3,7 @@
 ## **Overview**
 Add "Key Assumptions" section at end of responses showing date ranges, filters, limits, and aggregation levels.
 
-**Storage Decision:** New `data_range` column in `metadata_reference_table`
+**Storage Decision:** New `date_range` column in `metadata_reference_table`
 
 **State Decision:** Use existing `explanation` field (not new `highlights` field)
 
@@ -15,7 +15,7 @@ Add "Key Assumptions" section at end of responses showing date ranges, filters, 
 
 ### **1.1 Update `create_metadata_reference_table` Function**
 
-Add `data_range TEXT` column to table creation:
+Add `date_range TEXT` column to table creation:
 
 ```python
 def create_metadata_reference_table(connection_string: str):
@@ -33,7 +33,7 @@ def create_metadata_reference_table(connection_string: str):
             foreign_key_column TEXT,
             comment TEXT,
             column_values TEXT,
-            data_range TEXT  -- NEW
+            date_range TEXT  -- NEW
         )
     """)
 
@@ -76,14 +76,14 @@ def get_date_ranges_for_tables(sql_query: str) -> list[str]:
     try:
         # Build WHERE IN clause with quoted table names
         table_list = ', '.join([f"'{t}'" for t in tables])
-        query = f"SELECT DISTINCT data_range FROM metadata_reference_table WHERE table_name IN ({table_list}) AND data_range IS NOT NULL"
+        query = f"SELECT DISTINCT date_range FROM metadata_reference_table WHERE table_name IN ({table_list}) AND date_range IS NOT NULL"
 
         result_df = db_manager._execute_sql(query)
 
         if result_df.empty:
             return []
 
-        return result_df['data_range'].tolist()
+        return result_df['date_range'].tolist()
     except Exception as e:
         return []
 
@@ -93,18 +93,24 @@ class QueryExplanation(TypedDict):
 def create_query_explanation(sql_query: str, sql_query_result: str) -> dict:
     """Generate explanation highlights for query assumptions"""
 
-    system_prompt = """Analyze SQL query and generate 2-5 concise bullet points.
+    system_prompt = """You are provided with the following SQL query:
+{sql_query}.
+Your task is to highlight parts of this query to a non-technical user, including only the highlight types below if they exist.
 
-SQL Query: {sql_query}
+Guidelines:
+- Use only bullet points, max 0-3 bullet points, keep just the most important info.
+- Keep every bullet very concise, very few words.
+- Don't include filters applied to current records.
+- Don't include highlights that are not part of the list below. 
 
-Categories: filters, aggregation level, limits, record status
-
-Format: Short phrases, no articles. Examples:
-- "Active advisors only"
-- "Top 10 by revenue"
-- "Aggregated at household level"
-
-Only include TRUE statements. Max 5, min 2."""
+List of highlight types:
+  - filters applied. 
+    Ex: “excluded inactive affiliates”.
+  - Show time range of the source table (min/max dates) if the source table for the query has data over time. 
+    Ex: “account snapshot dates between 2021 and 2022”
+  - TOP X rows limits the result.
+    Ex: "Results limited to top 10 affiliates by assets”  
+    """
 
     prompt = create_prompt_template('system', system_prompt)
     chain = prompt | llm_fast.with_structured_output(QueryExplanation)
@@ -120,7 +126,7 @@ Only include TRUE statements. Max 5, min 2."""
     return {'explanation': combined_explanation}
 ```
 
-### **2.3 Generate Explanation** (line 491 in `execute_sql_query`)
+### **2.3 Generate Explanation**
 
 **After** `analysis = create_query_analysis(...)`, add:
 ```python
@@ -132,7 +138,7 @@ explanation = create_query_explanation(sql_query, sql_query_result)
 state['current_sql_queries'][query_index]['explanation'] = explanation['explanation']
 ```
 
-### **2.4 Format Explanations** (after line 738)
+### **2.4 Format Explanations** 
 
 ```python
 def format_sql_query_explanations_for_prompt(sql_queries: list[dict]) -> str:
@@ -149,38 +155,25 @@ def format_sql_query_explanations_for_prompt(sql_queries: list[dict]) -> str:
     return "\n\n**Key Assumptions:**\n" + "\n".join([f"• {e}" for e in unique_explanations])
 ```
 
-### **2.5 Append to Response** (line 752 in `generate_answer`)
+### **2.5 Append to Response**
 
-**Replace** the `final_answer_chain` with:
+**Add** the `create_final_message` function and **replace** `final_answer_chain`:
 
 ```python
-def create_final_message(x):
-    base_content = x['llm_answer'].content
-    explanation_section = ""
-    if x['input_state'].get('generate_answer_details', {}).get('scenario') == 'A':
-        explanation_section = format_sql_query_explanations_for_prompt(x['input_state']['current_sql_queries'])
-    return {'ai_message': AIMessage(content=base_content + explanation_section,
-                                   response_metadata=x['llm_answer'].response_metadata)}
+# After: llm_answer_chain = prompt | llm
 
-final_answer_chain = {
-    'llm_answer': llm_answer_chain,
-    'input_state': RunnablePassthrough()
-} | RunnableLambda(create_final_message)
+def create_final_message(llm_response):
+    base_content = llm_response.content
+    explanation_section = ""
+    if state.get('generate_answer_details', {}).get('scenario') == 'A':
+        explanation_section = format_sql_query_explanations_for_prompt(state['current_sql_queries'])
+    return {'ai_message': AIMessage(content=base_content + explanation_section,
+                                   response_metadata=llm_response.response_metadata)}
+
+final_answer_chain = llm_answer_chain | RunnableLambda(create_final_message)
 ```
 
----
-
-## **Checklist**
-
-- [ ] Update `create_metadata_reference_table()` to add `data_range` column
-- [ ] Manually populate `data_range` values for temporal tables
-- [ ] Add `sqlglot` import to agent.py
-- [ ] Add `extract_tables_from_sql()` function
-- [ ] Add `get_date_ranges_for_tables()` function
-- [ ] Add `create_query_explanation()` function
-- [ ] Generate explanation in `execute_sql_query()`
-- [ ] Add `format_sql_query_explanations_for_prompt()` function
-- [ ] Update `generate_answer()` to append explanations
+**Note:** `create_final_message` is defined inside `generate_answer(state:State)` and accesses `state` via closure.
 
 ---
 
