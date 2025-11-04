@@ -1,0 +1,159 @@
+let
+    // Reference your existing dim_employee table
+    Source = DIM_EMPLOYEE,
+
+    // Add a custom column with the hierarchy path
+    AddPath = Table.AddColumn(Source, "HierarchyPath", each
+        let
+            GetPath = (EmpKey as number, optional Path as list) =>
+                let
+                    CurrentPath = if Path = null then {EmpKey} else Path,
+                    ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null,
+                    ManagerKey = if ManagerRow = null then null else ManagerRow[MANAGER_KEY],
+                    HasManager = ManagerKey <> null and ManagerKey <> EmpKey,
+                    Result = if HasManager then @GetPath(ManagerKey, CurrentPath & {ManagerKey}) else CurrentPath
+                in
+                    Result
+        in
+            GetPath([EMPLOYEE_KEY])
+    ),
+
+    // Add level columns for managers (going UP the hierarchy)
+    AddLevel1 = Table.AddColumn(AddPath, "EMPLOYEE_FULL_NAME_LVL_1", each
+        if List.Count([HierarchyPath]) >= 2
+        then
+            let
+                ManagerKey = [HierarchyPath]{1},
+                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+            in
+                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+        else null
+    ),
+
+    AddLevel2 = Table.AddColumn(AddLevel1, "EMPLOYEE_FULL_NAME_LVL_2", each
+        if List.Count([HierarchyPath]) >= 3
+        then
+            let
+                ManagerKey = [HierarchyPath]{2},
+                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+            in
+                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+        else null
+    ),
+
+    AddLevel3 = Table.AddColumn(AddLevel2, "EMPLOYEE_FULL_NAME_LVL_3", each
+        if List.Count([HierarchyPath]) >= 4
+        then
+            let
+                ManagerKey = [HierarchyPath]{3},
+                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+            in
+                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+        else null
+    ),
+
+    AddLevel4 = Table.AddColumn(AddLevel3, "EMPLOYEE_FULL_NAME_LVL_4", each
+        if List.Count([HierarchyPath]) >= 5
+        then
+            let
+                ManagerKey = [HierarchyPath]{4},
+                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+            in
+                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+        else null
+    ),
+
+    AddLevel5 = Table.AddColumn(AddLevel4, "EMPLOYEE_FULL_NAME_LVL_5", each
+        if List.Count([HierarchyPath]) >= 6
+        then
+            let
+                ManagerKey = [HierarchyPath]{5},
+                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+            in
+                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+        else null
+    ),
+
+    AddLevel6 = Table.AddColumn(AddLevel5, "EMPLOYEE_FULL_NAME_LVL_6", each
+        if List.Count([HierarchyPath]) >= 7
+        then
+            let
+                ManagerKey = [HierarchyPath]{6},
+                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+            in
+                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+        else null
+    ),
+
+    AddLevel7 = Table.AddColumn(AddLevel6, "EMPLOYEE_FULL_NAME_LVL_7", each
+        if List.Count([HierarchyPath]) >= 8
+        then
+            let
+                ManagerKey = [HierarchyPath]{7},
+                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+            in
+                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+        else null
+    ),
+
+    AddLevel8 = Table.AddColumn(AddLevel7, "EMPLOYEE_FULL_NAME_LVL_8", each
+        if List.Count([HierarchyPath]) >= 9
+        then
+            let
+                ManagerKey = [HierarchyPath]{8},
+                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+            in
+                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+        else null
+    ),
+
+    AddLevel9 = Table.AddColumn(AddLevel8, "EMPLOYEE_FULL_NAME_LVL_9", each
+        if List.Count([HierarchyPath]) >= 10
+        then
+            let
+                ManagerKey = [HierarchyPath]{9},
+                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+            in
+                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+        else null
+    ),
+
+    AddLevel10 = Table.AddColumn(AddLevel9, "EMPLOYEE_FULL_NAME_LVL_10", each
+        if List.Count([HierarchyPath]) >= 11
+        then
+            let
+                ManagerKey = [HierarchyPath]{10},
+                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+            in
+                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+        else null
+    ),
+
+    AddLevel11 = Table.AddColumn(AddLevel10, "EMPLOYEE_FULL_NAME_LVL_11", each
+        if List.Count([HierarchyPath]) >= 12
+        then
+            let
+                ManagerKey = [HierarchyPath]{11},
+                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+            in
+                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+        else null
+    ),
+
+    // Keep only needed columns
+    SelectColumns = Table.SelectColumns(AddLevel11, {
+        "EMPLOYEE_KEY",
+        "EMPLOYEE_FULL_NAME_LVL_1",
+        "EMPLOYEE_FULL_NAME_LVL_2",
+        "EMPLOYEE_FULL_NAME_LVL_3",
+        "EMPLOYEE_FULL_NAME_LVL_4",
+        "EMPLOYEE_FULL_NAME_LVL_5",
+        "EMPLOYEE_FULL_NAME_LVL_6",
+        "EMPLOYEE_FULL_NAME_LVL_7",
+        "EMPLOYEE_FULL_NAME_LVL_8",
+        "EMPLOYEE_FULL_NAME_LVL_9",
+        "EMPLOYEE_FULL_NAME_LVL_10",
+        "EMPLOYEE_FULL_NAME_LVL_11"
+    })
+in
+    SelectColumns
