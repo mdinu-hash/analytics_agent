@@ -5,141 +5,149 @@ let
     // Filter for current employees only
     FilterCurrent = Table.SelectRows(Source, each ([CURRENT_FLAG] = true)),
 
-    // Add a custom column with the hierarchy path
-    AddPath = Table.AddColumn(FilterCurrent, "HierarchyPath", each
+    // Function to recursively get all reporting paths below an employee
+    GetAllPaths = (EmpKey as number, optional CurrentPath as list) =>
         let
-            GetPath = (EmpKey as number, optional Path as list) =>
+            Path = if CurrentPath = null then {} else CurrentPath,
+
+            // Get direct reports of current employee
+            DirectReports = Table.SelectRows(FilterCurrent, each [SUPERVISOR_EMPLOYEE_KEY] = EmpKey),
+            DirectReportKeys = DirectReports[EMPLOYEE_KEY],
+
+            Result = if List.Count(DirectReportKeys) = 0 then
+                // No reports - return the current path (or empty if at top)
+                if List.Count(Path) = 0 then {} else {Path}
+            else
+                // Has reports - recursively get all paths through each report
                 let
-                    CurrentPath = if Path = null then {EmpKey} else Path,
-                    ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null,
-                    ManagerKey = if ManagerRow = null then null else ManagerRow[SUPERVISOR_EMPLOYEE_KEY],
-                    HasManager = ManagerKey <> null and ManagerKey <> EmpKey,
-                    Result = if HasManager then @GetPath(ManagerKey, CurrentPath & {ManagerKey}) else CurrentPath
+                    AllSubPaths = List.Transform(
+                        DirectReportKeys,
+                        each @GetAllPaths(_, Path & {_})
+                    ),
+                    FlattenedPaths = List.Combine(AllSubPaths)
                 in
-                    Result
+                    FlattenedPaths
         in
-            GetPath([EMPLOYEE_KEY])
+            Result,
+
+    // Get all employees and their downward reporting paths
+    AllEmployees = Table.AddColumn(FilterCurrent, "ReportingPaths", each GetAllPaths([EMPLOYEE_KEY])),
+
+    // Expand so each path becomes its own row
+    ExpandPaths = Table.AddColumn(AllEmployees, "PathExpanded", each
+        if List.Count([ReportingPaths]) = 0 then {null} else [ReportingPaths]
     ),
 
-    // Add level columns for managers (going UP the hierarchy)
-    AddLevel1 = Table.AddColumn(AddPath, "EMPLOYEE_FULL_NAME_LVL_1", each
-        if List.Count([HierarchyPath]) >= 2
-        then
+    ExpandToRows = Table.ExpandListColumn(ExpandPaths, "PathExpanded"),
+
+    // Add columns for each level in the hierarchy
+    AddLevel1 = Table.AddColumn(ExpandToRows, "EMPLOYEE_FULL_NAME_LVL_1", each
+        if [PathExpanded] <> null and List.Count([PathExpanded]) >= 1 then
             let
-                ManagerKey = [HierarchyPath]{1},
-                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                EmpKey = [PathExpanded]{0},
+                EmpRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null
             in
-                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+                if EmpRow <> null then EmpRow[EMPLOYEE_FULL_NAME] else null
         else null
     ),
 
     AddLevel2 = Table.AddColumn(AddLevel1, "EMPLOYEE_FULL_NAME_LVL_2", each
-        if List.Count([HierarchyPath]) >= 3
-        then
+        if [PathExpanded] <> null and List.Count([PathExpanded]) >= 2 then
             let
-                ManagerKey = [HierarchyPath]{2},
-                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                EmpKey = [PathExpanded]{1},
+                EmpRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null
             in
-                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+                if EmpRow <> null then EmpRow[EMPLOYEE_FULL_NAME] else null
         else null
     ),
 
     AddLevel3 = Table.AddColumn(AddLevel2, "EMPLOYEE_FULL_NAME_LVL_3", each
-        if List.Count([HierarchyPath]) >= 4
-        then
+        if [PathExpanded] <> null and List.Count([PathExpanded]) >= 3 then
             let
-                ManagerKey = [HierarchyPath]{3},
-                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                EmpKey = [PathExpanded]{2},
+                EmpRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null
             in
-                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+                if EmpRow <> null then EmpRow[EMPLOYEE_FULL_NAME] else null
         else null
     ),
 
     AddLevel4 = Table.AddColumn(AddLevel3, "EMPLOYEE_FULL_NAME_LVL_4", each
-        if List.Count([HierarchyPath]) >= 5
-        then
+        if [PathExpanded] <> null and List.Count([PathExpanded]) >= 4 then
             let
-                ManagerKey = [HierarchyPath]{4},
-                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                EmpKey = [PathExpanded]{3},
+                EmpRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null
             in
-                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+                if EmpRow <> null then EmpRow[EMPLOYEE_FULL_NAME] else null
         else null
     ),
 
     AddLevel5 = Table.AddColumn(AddLevel4, "EMPLOYEE_FULL_NAME_LVL_5", each
-        if List.Count([HierarchyPath]) >= 6
-        then
+        if [PathExpanded] <> null and List.Count([PathExpanded]) >= 5 then
             let
-                ManagerKey = [HierarchyPath]{5},
-                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                EmpKey = [PathExpanded]{4},
+                EmpRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null
             in
-                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+                if EmpRow <> null then EmpRow[EMPLOYEE_FULL_NAME] else null
         else null
     ),
 
     AddLevel6 = Table.AddColumn(AddLevel5, "EMPLOYEE_FULL_NAME_LVL_6", each
-        if List.Count([HierarchyPath]) >= 7
-        then
+        if [PathExpanded] <> null and List.Count([PathExpanded]) >= 6 then
             let
-                ManagerKey = [HierarchyPath]{6},
-                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                EmpKey = [PathExpanded]{5},
+                EmpRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null
             in
-                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+                if EmpRow <> null then EmpRow[EMPLOYEE_FULL_NAME] else null
         else null
     ),
 
     AddLevel7 = Table.AddColumn(AddLevel6, "EMPLOYEE_FULL_NAME_LVL_7", each
-        if List.Count([HierarchyPath]) >= 8
-        then
+        if [PathExpanded] <> null and List.Count([PathExpanded]) >= 7 then
             let
-                ManagerKey = [HierarchyPath]{7},
-                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                EmpKey = [PathExpanded]{6},
+                EmpRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null
             in
-                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+                if EmpRow <> null then EmpRow[EMPLOYEE_FULL_NAME] else null
         else null
     ),
 
     AddLevel8 = Table.AddColumn(AddLevel7, "EMPLOYEE_FULL_NAME_LVL_8", each
-        if List.Count([HierarchyPath]) >= 9
-        then
+        if [PathExpanded] <> null and List.Count([PathExpanded]) >= 8 then
             let
-                ManagerKey = [HierarchyPath]{8},
-                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                EmpKey = [PathExpanded]{7},
+                EmpRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null
             in
-                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+                if EmpRow <> null then EmpRow[EMPLOYEE_FULL_NAME] else null
         else null
     ),
 
     AddLevel9 = Table.AddColumn(AddLevel8, "EMPLOYEE_FULL_NAME_LVL_9", each
-        if List.Count([HierarchyPath]) >= 10
-        then
+        if [PathExpanded] <> null and List.Count([PathExpanded]) >= 9 then
             let
-                ManagerKey = [HierarchyPath]{9},
-                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                EmpKey = [PathExpanded]{8},
+                EmpRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null
             in
-                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+                if EmpRow <> null then EmpRow[EMPLOYEE_FULL_NAME] else null
         else null
     ),
 
     AddLevel10 = Table.AddColumn(AddLevel9, "EMPLOYEE_FULL_NAME_LVL_10", each
-        if List.Count([HierarchyPath]) >= 11
-        then
+        if [PathExpanded] <> null and List.Count([PathExpanded]) >= 10 then
             let
-                ManagerKey = [HierarchyPath]{10},
-                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                EmpKey = [PathExpanded]{9},
+                EmpRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null
             in
-                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+                if EmpRow <> null then EmpRow[EMPLOYEE_FULL_NAME] else null
         else null
     ),
 
     AddLevel11 = Table.AddColumn(AddLevel10, "EMPLOYEE_FULL_NAME_LVL_11", each
-        if List.Count([HierarchyPath]) >= 12
-        then
+        if [PathExpanded] <> null and List.Count([PathExpanded]) >= 11 then
             let
-                ManagerKey = [HierarchyPath]{11},
-                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                EmpKey = [PathExpanded]{10},
+                EmpRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null
             in
-                if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
+                if EmpRow <> null then EmpRow[EMPLOYEE_FULL_NAME] else null
         else null
     ),
 
