@@ -2,14 +2,17 @@ let
     // Reference your existing dim_employee table
     Source = DIM_EMPLOYEE,
 
+    // Filter for current employees only
+    FilterCurrent = Table.SelectRows(Source, each ([CURRENT_FLAG] = true)),
+
     // Add a custom column with the hierarchy path
-    AddPath = Table.AddColumn(Source, "HierarchyPath", each
+    AddPath = Table.AddColumn(FilterCurrent, "HierarchyPath", each
         let
             GetPath = (EmpKey as number, optional Path as list) =>
                 let
                     CurrentPath = if Path = null then {EmpKey} else Path,
-                    ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null,
-                    ManagerKey = if ManagerRow = null then null else ManagerRow[MANAGER_KEY],
+                    ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = EmpKey){0} otherwise null,
+                    ManagerKey = if ManagerRow = null then null else ManagerRow[SUPERVISOR_EMPLOYEE_KEY],
                     HasManager = ManagerKey <> null and ManagerKey <> EmpKey,
                     Result = if HasManager then @GetPath(ManagerKey, CurrentPath & {ManagerKey}) else CurrentPath
                 in
@@ -24,7 +27,7 @@ let
         then
             let
                 ManagerKey = [HierarchyPath]{1},
-                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
             in
                 if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
         else null
@@ -35,7 +38,7 @@ let
         then
             let
                 ManagerKey = [HierarchyPath]{2},
-                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
             in
                 if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
         else null
@@ -46,7 +49,7 @@ let
         then
             let
                 ManagerKey = [HierarchyPath]{3},
-                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
             in
                 if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
         else null
@@ -57,7 +60,7 @@ let
         then
             let
                 ManagerKey = [HierarchyPath]{4},
-                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
             in
                 if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
         else null
@@ -68,7 +71,7 @@ let
         then
             let
                 ManagerKey = [HierarchyPath]{5},
-                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
             in
                 if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
         else null
@@ -79,7 +82,7 @@ let
         then
             let
                 ManagerKey = [HierarchyPath]{6},
-                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
             in
                 if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
         else null
@@ -90,7 +93,7 @@ let
         then
             let
                 ManagerKey = [HierarchyPath]{7},
-                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
             in
                 if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
         else null
@@ -101,7 +104,7 @@ let
         then
             let
                 ManagerKey = [HierarchyPath]{8},
-                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
             in
                 if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
         else null
@@ -112,7 +115,7 @@ let
         then
             let
                 ManagerKey = [HierarchyPath]{9},
-                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
             in
                 if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
         else null
@@ -123,7 +126,7 @@ let
         then
             let
                 ManagerKey = [HierarchyPath]{10},
-                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
             in
                 if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
         else null
@@ -134,7 +137,7 @@ let
         then
             let
                 ManagerKey = [HierarchyPath]{11},
-                ManagerRow = try Table.SelectRows(Source, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
+                ManagerRow = try Table.SelectRows(FilterCurrent, (r) => r[EMPLOYEE_KEY] = ManagerKey){0} otherwise null
             in
                 if ManagerRow <> null then ManagerRow[EMPLOYEE_FULL_NAME] else null
         else null
