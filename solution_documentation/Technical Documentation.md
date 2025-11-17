@@ -85,6 +85,10 @@ Orchestrator
 
 ## Key Variables
 
+### database_schema_context
+Contains table and column definitions, relationships, query instructions for key terms, date range assumptions.
+Used to inject context for the LLM to create accurate sql queries. In: extract_analytical_intent ....
+
 ### Notes:
 Scenario A: blank.
 Scenario B: blank.
@@ -95,3 +99,38 @@ Scenario D: brief explanation of what makes the question ambiguous and mention a
 
 get_next_tool(state): - if extract_analytical_intent and create sql query ran once: generate_answer, 
                       - otherwise: extract_analytical_intent.	
+
+## Dependencies between modules
+
+- src.init.init_demo_database.demo_database_util: class DemoDatabaseMetadataManager
+
+- src.init.llm_util: llm_provider variable and helper functions for calling the llm provider and calculating tokens. 	
+	
+- src.init.initialization: connection strings and keys to connect to db, llm provider, langsmith.
+functions to manage thread ids.
+creates variables objects_documentation, database_content, sql_dialect.
+
+## Guidelines for documenting glossaries
+
+### database_schema
+
+#### query_to_get_column_values
+populate this for the attributes that are important for suggesting detailed analysis on those attributes, or for knowing the key values stored in these columns (ex specific client segments).
+
+It's used for the agent to understand which column to query based on specific values ("what about BDM?" - BDM being a client segment, the agent has to know it's part of the respective columns).
+
+It's also used for the agent to suggest next steps.
+
+#### date_range.
+Used to make the agent aware of which dates are available in the database.
+
+### business_glossary
+
+#### key_terms:
+- in the query_instructions key, add instructions on how to query. 
+- use active, direct language like "to get recent records, filter for account.account_status = 'Active'"
+- whenever you mention a column, specify in this format: table_name.column_name
+- add here filters and transformations for querying certain terms.
+
+#### Synonyms:
+- Add the synonym to the left and the key term (defined) in the right
