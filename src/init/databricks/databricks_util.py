@@ -9,7 +9,7 @@ import mlflow.langchain
 import datetime
 import uuid
 
-def execute_sql_query(query: str, warehouse_id: str, params: Dict = None) -> List[tuple]:
+def execute_query(query: str, warehouse_id: str, params: Dict = None) -> List[tuple]:
     """
     Execute a SQL query using Databricks SDK with native authentication.
 
@@ -87,7 +87,7 @@ def create_objects_documentation(database_schema, table_relationships, key_terms
             query = column_info.get('query_to_get_column_values', '')
             if query and query.strip():
                 # Execute query to get column values
-                results = execute_sql_query(query, warehouse_id)
+                results = execute_query(query, warehouse_id)
                 if results:
                     # Extract values from results
                     column_values = []
@@ -103,7 +103,7 @@ def create_objects_documentation(database_schema, table_relationships, key_terms
             date_query = column_info.get('query_to_get_date_range', '')
             if date_query and date_query.strip():
                 # Execute query to get date range
-                results = execute_sql_query(date_query, warehouse_id)
+                results = execute_query(date_query, warehouse_id)
                 if results and results[0] and results[0][0] is not None:
                     date_info = str(results[0][0])
                     date_range_entries.append(f"  - Table {table_name}, column {column_name}: {date_info}\n")

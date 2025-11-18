@@ -12,7 +12,7 @@ def get_db_connection(connection_string):
         if conn:
             conn.close()
 
-def execute_sql_query(query, connection_string):
+def execute_query(query, connection_string):
     """
     Execute a SQL query and return results.
 
@@ -66,7 +66,7 @@ def create_objects_documentation(database_schema, table_relationships, key_terms
             query = column_info.get('query_to_get_column_values', '')
             if query and query.strip():
                 # Execute query to get column values
-                results = execute_sql_query(query, connection_string)
+                results = execute_query(query, connection_string)
                 if results:
                     # Extract values from results
                     column_values = []
@@ -82,7 +82,7 @@ def create_objects_documentation(database_schema, table_relationships, key_terms
             date_query = column_info.get('query_to_get_date_range', '')
             if date_query and date_query.strip():
                 # Execute query to get date range
-                results = execute_sql_query(date_query, connection_string)
+                results = execute_query(date_query, connection_string)
                 if results and results[0] and results[0][0] is not None:
                     date_info = str(results[0][0])
                     date_range_entries.append(f"  - Table {table_name}, column {column_name}: {date_info}\n")

@@ -33,7 +33,7 @@ from src.init.initialization import (
 from src.init.llm_util import create_prompt_template, get_token_usage, calculate_chat_history_tokens, llm_provider
 
 # Import PostgreSQL database utility
-from src.init.init_demo_database.demo_database_util import execute_sql_query
+from src.init.init_demo_database.demo_database_util import execute_query
 
 _progress_queue = queue.Queue()  # Global shared progress queue
 
@@ -433,7 +433,7 @@ def get_date_ranges_for_tables(sql_query: str) -> list[str]:
                     date_query = column_info.get('query_to_get_date_range', '')
                     if date_query and date_query.strip():
                         # Execute the date range query
-                        results = execute_sql_query(date_query, connection_string)
+                        results = execute_query(date_query, connection_string)
                         if results and results[0] and results[0][0] is not None:
                             date_info = str(results[0][0])
                             date_ranges.append(f"{table_name}, column {column_name}: {date_info}")
@@ -515,7 +515,7 @@ def correct_syntax_sql_query(sql_query: str, error:str, objects_documentation: s
  sql_query = result['query']
  return sql_query
 
-def execute_sql_query_tool(state:State):
+def execute_sql_query(state:State):
   """ executes the sql query and retrieve the result """
 
   show_progress("⚙️ Analysing results...")
@@ -530,7 +530,7 @@ def execute_sql_query_tool(state:State):
 
        # executes the query and if it throws an error, correct it (max 3x times) then execute it again.
        try:
-           results = execute_sql_query(sql_query, connection_string)
+           results = execute_query(sql_query, connection_string)
            if results is None or len(results) == 0:
                sql_query_result = "No results found."
            else:
@@ -546,7 +546,7 @@ def execute_sql_query_tool(state:State):
             sql_query = correct_syntax_sql_query(sql_query,error,objects_documentation,state['sql_dialect'])
 
             try:
-                results = execute_sql_query(sql_query, connection_string)
+                results = execute_query(sql_query, connection_string)
                 if results is None or len(results) == 0:
                     sql_query_result = "No results found."
                 else:
@@ -1017,7 +1017,7 @@ def run_control_flow(state:State):
     # creating & executing new queries
     elif tool_name == 'create_sql_query_or_queries':
       state = create_sql_query_or_queries.invoke({'state':state})
-      execute_sql_query_tool(state)
+      execute_sql_query(state)
 
     # generate answer & manage chat history.
     elif tool_name == 'generate_answer':  

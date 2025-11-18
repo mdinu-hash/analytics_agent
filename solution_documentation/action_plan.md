@@ -111,12 +111,39 @@ def check_glossary_consistency():
 
 - Database Utility Functions
 
-**For databricks_util.py (Databricks environment):**
+**For demo_database_util.py (PostgreSQL environment):**
 
-**Add execute_sql_query utility function** at the top of databricks_util.py:
+**Add execute_query utility function**:
 
 ```python
-def execute_sql_query(query: str, warehouse_id: str, params: Dict = None) -> List[tuple]:
+def execute_query(query, connection_string):
+    """
+    Execute a SQL query and return results.
+
+    Args:
+        query: SQL query string to execute
+        connection_string: PostgreSQL connection string
+
+    Returns:
+        List of results (each row as a tuple), or None if query fails
+    """
+    try:
+        with get_db_connection(connection_string) as conn:
+            cursor = conn.cursor()
+            cursor.execute(query)
+            results = cursor.fetchall()
+            return results
+    except Exception as e:
+        print(f"Error executing query: {e}")
+        return None
+```
+
+**For databricks_util.py (Databricks environment):**
+
+**Add execute_query utility function** at the top of databricks_util.py:
+
+```python
+def execute_query(query: str, warehouse_id: str, params: Dict = None) -> List[tuple]:
     """
     Execute a SQL query using Databricks SDK with native authentication.
 
@@ -201,7 +228,7 @@ def create_objects_documentation(database_schema, table_relationships, key_terms
             query = column_info.get('query_to_get_column_values', '')
             if query and query.strip():
                 # Execute query to get column values
-                results = execute_sql_query(query, warehouse_id)
+                results = execute_query(query, warehouse_id)
                 if results:
                     # Extract values from results
                     column_values = []
@@ -217,7 +244,7 @@ def create_objects_documentation(database_schema, table_relationships, key_terms
             date_query = column_info.get('query_to_get_date_range', '')
             if date_query and date_query.strip():
                 # Execute query to get date range
-                results = execute_sql_query(date_query, warehouse_id)
+                results = execute_query(date_query, warehouse_id)
                 if results and results[0] and results[0][0] is not None:
                     date_info = str(results[0][0])
                     date_range_entries.append(f"  - Table {table_name}, column {column_name}: {date_info}\n")
@@ -284,7 +311,7 @@ objects_documentation = create_objects_documentation(database_schema, table_rela
 - All scenario Invoke_Params (A, B, C, D): remove database_content
 - response_guidelines: remove "Summary of database content: {database_content}." section and update references to use database schema instead
 
-**Important**: In agent.py, rename the existing `execute_sql_query(state:State)` function to `execute_sql_query_tool(state:State)` to avoid naming conflict with the new utility function from demo_database_util.py. Update the function to use the new `execute_sql_query(query, connection_string)` utility function and convert results to DataFrame for display.
+**Important**: In agent.py, the agent tool function remains named `execute_sql_query(state:State)`. The new utility function is named `execute_query(query, connection_string)` to avoid naming conflicts. Update the agent tool to use the new `execute_query(query, connection_string)` utility function and convert results to DataFrame for display.
 
 **Update get_date_ranges_for_tables() function** in agent.py:
 This function previously queried `metadata_reference_table` using `get_database_manager()`. Update it to:
@@ -292,7 +319,7 @@ This function previously queried `metadata_reference_table` using `get_database_
 2. Remove `get_database_manager()` call and old SQL query to metadata_reference_table
 3. Iterate through database_schema list to find tables matching those in the SQL query
 4. For each matching table, check all columns for `query_to_get_date_range`
-5. Execute those queries using `execute_sql_query(query, connection_string)` utility function
+5. Execute those queries using `execute_query(query, connection_string)` utility function
 6. Format results as: `"{table_name}, column {column_name}: {date_info}"`
 
 - Delete update_objects_metadata_snowflake.py and the init_snowflake_database folder.
