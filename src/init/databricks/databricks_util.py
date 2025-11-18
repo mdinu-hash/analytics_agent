@@ -9,6 +9,139 @@ import mlflow.langchain
 import datetime
 import uuid
 
+def execute_sql_query(query: str, warehouse_id: str, params: Dict = None) -> List[tuple]:
+    """
+    Execute a SQL query using Databricks SDK with native authentication.
+
+    Args:
+        query: SQL query string to execute
+        warehouse_id: Databricks SQL warehouse ID
+        params: Optional dict of parameters to replace in query (e.g., {'catalog': 'main'})
+
+    Returns:
+        List of tuples (each row as a tuple), or None if query fails
+
+    Note: Uses native Databricks authentication (WorkspaceClient).
+    When deployed as Model Serving Endpoint, runs with service principal permissions.
+    """
+    try:
+        # Native Databricks Authentication (uses current user/service principal credentials)
+        w = WorkspaceClient()
+
+        # Replace parameters in query if provided
+        if params:
+            for key, value in params.items():
+                if isinstance(value, str):
+                    escaped_value = value.replace("'", "''")
+                    query = query.replace(f":{key}", f"'{escaped_value}'")
+                else:
+                    query = query.replace(f":{key}", str(value))
+
+        # Execute query using Databricks SDK
+        response = w.statement_execution.execute_statement(
+            statement=query,
+            warehouse_id=warehouse_id,
+            wait_timeout="50s"
+        )
+
+        # Convert to list of tuples for consistency with PostgreSQL version
+        if response.result and response.result.data_array:
+            return [tuple(row) for row in response.result.data_array]
+        else:
+            return []
+
+    except Exception as e:
+        print(f"Error executing query: {e}")
+        return None
+
+def create_objects_documentation(database_schema, table_relationships, key_terms, warehouse_id):
+    """
+    Build comprehensive database schema context string.
+
+    Args:
+        database_schema: List of table dictionaries with columns
+        table_relationships: List of relationship dictionaries
+        key_terms: List of business term dictionaries
+        warehouse_id: Databricks SQL warehouse ID
+
+    Returns:
+        str: Formatted documentation string
+    """
+    objects_documentation = []
+    date_range_entries = []
+
+    # Add all tables with all their columns AND values
+    for table in database_schema:
+        table_name = table['table_name']
+        table_desc = table['table_description']
+
+        # Start with table info
+        table_text = f"Table {table_name}: {table_desc}\n"
+        table_text += "Columns:\n"
+
+        # Add all columns for this table
+        for column_name, column_info in table['columns'].items():
+            table_text += f"  - Column {column_name}: {column_info['description']}\n"
+
+            # Check if column has a query to get values
+            query = column_info.get('query_to_get_column_values', '')
+            if query and query.strip():
+                # Execute query to get column values
+                results = execute_sql_query(query, warehouse_id)
+                if results:
+                    # Extract values from results
+                    column_values = []
+                    for row in results:
+                        if row and row[0] is not None:
+                            column_values.append(str(row[0]))
+
+                    # Add values as pipe-separated string
+                    values_str = ' | '.join(column_values)
+                    table_text += f"    Values in column {column_name}: {values_str}\n"
+
+            # Check if column has a query to get date range
+            date_query = column_info.get('query_to_get_date_range', '')
+            if date_query and date_query.strip():
+                # Execute query to get date range
+                results = execute_sql_query(date_query, warehouse_id)
+                if results and results[0] and results[0][0] is not None:
+                    date_info = str(results[0][0])
+                    date_range_entries.append(f"  - Table {table_name}, column {column_name}: {date_info}\n")
+
+        objects_documentation.append(table_text)
+
+    # Add ALL table relationships
+    relationships_text = "\nRelationships between Tables:\n"
+    for rel in table_relationships:
+        relationships_text += f"  {rel['key1']} -> {rel['key2']}\n"
+    objects_documentation.append(relationships_text)
+
+    # Add date range information
+    if date_range_entries:
+        date_range = "\nImportant considerations about dates available:\n"
+        date_range += "".join(date_range_entries)
+        objects_documentation.append(date_range)
+
+    # Add key terms with query instructions
+    key_terms_text = "\nQuery instructions for key terms:\n"
+    for term in key_terms:
+        term_name = term['name']
+        term_definition = term['definition']
+        query_instructions = term['query_instructions']
+
+        if term_definition:
+            key_terms_text += f"  - {term_name}: {term_definition}\n"
+        else:
+            key_terms_text += f"  - {term_name}\n"
+
+        if query_instructions:
+            key_terms_text += f"    {query_instructions}\n"
+
+    objects_documentation.append(key_terms_text)
+
+    # Join all parts
+    return "\n".join(objects_documentation)
+
 class DatabricksMetadataManager:
   """ Get/Update tables metadata stored in Databricks. 
   Uses databricks native authentication and Databricks SDK for data operations. 
@@ -332,59 +465,10 @@ class DatabricksMetadataManager:
         
         return results
     
+  # Deprecated - use standalone create_objects_documentation function instead
   def create_objects_documentation(self, catalog_metadata_object_source: str, schema_metadata_object_source: str, table_metadata_object_source: str, tables: list = None) -> str:
-        """
-        Generate documentation for tables and columns based on the specified metadata reference table.
-        Args:
-            catalog_metadata_object_source: Catalog name for the metadata reference table
-            schema_metadata_object_source: Schema name for the metadata reference table
-            table_metadata_object_source: Table name for the metadata reference table
-            tables: Optional list of dicts, each with keys:
-                - 'table_catalog', 'table_schema', 'table_name', and optionally 'columns' (list of column names)
-                If None, all tables and columns in the metadata_reference_table are used.
-        Returns:
-            str: Formatted documentation string
-        """
-        import pandas as pd
-        query = f"SELECT * FROM `{catalog_metadata_object_source}`.{schema_metadata_object_source}.{table_metadata_object_source}"
-        df = self._execute_sql(query)
-        if df.empty:
-            return "No metadata found."
-        doc_lines = []
-        # Filter tables if provided
-        if tables:
-            # Build a set of (catalog, schema, table) for fast lookup
-            table_set = set((t['table_catalog'], t['table_schema'], t['table_name']) for t in tables)
-            df = df[df.apply(lambda row: (row['TABLE_CATALOG'], row['TABLE_SCHEMA'], row['TABLE_NAME']) in table_set, axis=1)]
-            # Optionally filter columns per table
-            table_columns = { (t['table_catalog'], t['table_schema'], t['table_name']): set(t.get('columns', [])) for t in tables if 'columns' in t }
-        else:
-            table_columns = {}
-        table_groups = df.groupby(['TABLE_CATALOG', 'TABLE_SCHEMA', 'TABLE_NAME'])
-        for (catalog, schema, table), group in table_groups:
-            doc_lines.append(f"Table {catalog}.{schema}.{table}: {group['TABLE_COLUMN_DOCUMENTATION'].iloc[0] if 'TABLE_COLUMN_DOCUMENTATION' in group and pd.notnull(group['TABLE_COLUMN_DOCUMENTATION'].iloc[0]) else ''} Columns:")
-            for _, row in group.iterrows():
-                col_name = row['COLUMN_NAME']
-                # Skip rows where COLUMN_NAME is null (table-level metadata)
-                if pd.isnull(col_name):
-                    continue
-                if (catalog, schema, table) in table_columns and col_name not in table_columns[(catalog, schema, table)]:
-                    continue
-                comment = row['TABLE_COLUMN_DOCUMENTATION'] if pd.notnull(row['TABLE_COLUMN_DOCUMENTATION']) else ''
-                doc_lines.append(f"    {col_name}: {comment}")
-            doc_lines.append("")
-        # Add relationships if present
-        rels = df.dropna(subset=['RELATIONSHIP_KEY1', 'RELATIONSHIP_KEY2'])
-        if not rels.empty:
-            doc_lines.append("Relationships:")
-            rel_pairs = set()
-            for _, row in rels.iterrows():
-                k1 = row['RELATIONSHIP_KEY1']
-                k2 = row['RELATIONSHIP_KEY2']
-                if (k1, k2) not in rel_pairs and (k2, k1) not in rel_pairs:
-                    doc_lines.append(f"{k1} relates to {k2}")
-                    rel_pairs.add((k1, k2))
-        return '\n'.join(doc_lines)
+        """DEPRECATED: This method is deprecated. Use the standalone create_objects_documentation() function instead."""
+        raise NotImplementedError("This method is deprecated. Use the standalone create_objects_documentation() function instead.")
 
   def get_database_content(self, catalog_metadata_object_source: str, schema_metadata_object_source: str, table_metadata_object_source: str) -> str:
         """

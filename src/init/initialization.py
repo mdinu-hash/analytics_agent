@@ -1,5 +1,5 @@
 ### This file is used to initialize the global variables for the agent:
-### objects_documentation, sql_dialect, database_content, llm
+### objects_documentation, sql_dialect, llm
 
 import os
 import uuid
@@ -9,8 +9,10 @@ from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from langchain.callbacks.tracers.langchain import LangChainTracer
-from src.init.init_demo_database.demo_database_util import DemoDatabaseMetadataManager
+from src.init.init_demo_database.demo_database_util import create_objects_documentation
 from src.init.llm_util import llm_provider
+from src.init.database_schema import database_schema, table_relationships
+from src.init.business_glossary import key_terms, synonyms, related_terms, check_glossary_consistency
 
 # Load environment variables from root directory
 current_dir = Path(__file__).parent
@@ -75,16 +77,12 @@ def create_config(run_name: str, is_new_thread_id: bool = False, thread_id: str 
 
     return config, thread_id
 
-# Initialize metadata manager and get database documentation
+# Run consistency check after import
+check_glossary_consistency()
 
-metadata_manager = DemoDatabaseMetadataManager(connection_string)
-        
-# Generate objects documentation from metadata_reference_table
-objects_documentation = metadata_manager.create_objects_documentation()
-        
-# Get database content (column values) from metadata_reference_table
-database_content = metadata_manager.get_database_content()
-        
+# Create objects documentation
+objects_documentation = create_objects_documentation(database_schema, table_relationships, key_terms, connection_string)
+
 # Set SQL dialect for PostgreSQL demo database
 sql_dialect = 'PostgreSQL'
-        
+

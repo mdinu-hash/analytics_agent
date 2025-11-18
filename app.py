@@ -31,7 +31,6 @@ try:
     graph = agent.graph
     create_config = agent.create_config
     objects_documentation = agent.objects_documentation
-    database_content = agent.database_content
     sql_dialect = agent.sql_dialect
     
 except Exception as e:
@@ -668,7 +667,6 @@ with tab1:
             if len(st.session_state.messages) == 1:  # first message (only current user message)
                 state_dict = {
                     'objects_documentation': objects_documentation,
-                    'database_content': database_content,
                     'sql_dialect': sql_dialect,
                     'messages_log': messages_log,
                     'intermediate_steps': [],

@@ -28,24 +28,12 @@ from sqlglot import parse_one
 # Import initialization components
 from src.init.initialization import (
     llm, llm_fast, create_config, tracer,
-    objects_documentation, database_content, sql_dialect, connection_string
+    objects_documentation, sql_dialect, connection_string
 )
 from src.init.llm_util import create_prompt_template, get_token_usage, calculate_chat_history_tokens, llm_provider
 
 # Import PostgreSQL database utility
-from src.init.init_demo_database.demo_database_util import DemoDatabaseMetadataManager
-
-# Initialize PostgreSQL database manager
-_db_manager = None
-
-def get_database_manager():
-    """Get PostgreSQL database manager, creating it if it doesn't exist"""
-    global _db_manager
-    if _db_manager is None:
-        if not connection_string:
-            raise ValueError("CONNECTION_STRING_DB environment variable is required for PostgreSQL demo database")
-        _db_manager = DemoDatabaseMetadataManager(connection_string)
-    return _db_manager
+from src.init.init_demo_database.demo_database_util import execute_sql_query
 
 _progress_queue = queue.Queue()  # Global shared progress queue
 
@@ -67,9 +55,8 @@ vector_store = None
 
 class State(TypedDict):
  objects_documentation: str
- database_content: str
  sql_dialect: str
- messages_log: Sequence[BaseMessage]
+ messages_log: Annotated[Sequence[BaseMessage], add_messages]
  intermediate_steps: list[AgentAction]
  analytical_intent: list[str]
  current_question: str
@@ -132,34 +119,31 @@ def extract_analytical_intent(state:State):
   sys_prompt_clear = """Refine technically the user ask for a sql developer with access to the following database schema:
   {objects_documentation}.
 
-  Summary of database content:
-  {database_content}.
-
   Conversation history:
   "{messages_log}".
 
   Last user prompt:
-  "{question}".  
+  "{question}".
 
 Important considerations about creating analytical intents:
     - The analytical intent will be used to create a single sql query.
     - Write it in 1 sentence.
-    - Mention just the column names, tables names, grouping levels, aggregation functions (preffered if it doesn't restrict insights) and filters from the database schema.     
-    - If the user ask is exploratory (ex: "What can you tell me about the dataset?"), create 3-5 analytical intents. 
+    - Mention just the column names, tables names, grouping levels, aggregation functions (preffered if it doesn't restrict insights) and filters from the database schema.
+    - If the user ask is exploratory (ex: "What can you tell me about the dataset?"), create 3-5 analytical intents.
     - If the user ask is non-exploratory, create only one analytical intent.
     - If the user asks for statistical analysis between variables (ex correlation) do not compute the statistical metrics, instead just show a simple side by side or group summary.
 
   Important considerations about time based analysis:
     - If the source columns are from tables showing evolutions of metrics over time, clearly specify the time range to apply the analysis on:
       Example: If the question does not specify a time range, specify a recent period like last 12 months, last 3 months.
-    - Use explicit date filters instead of relative expressions like "last 12 months". Derive actual date ranges from the feedback date ranges described in database_content. 
+    - Use explicit date filters instead of relative expressions like "last 12 months". Derive actual date ranges from the date ranges described in the database schema under "Important considerations about dates available".
     - Group the specified period in time-based groups (monthly, quarterly) and compare first with last group.
 
-  Important considerations about complex, multi-steps analytical intents:  
-  - An analytical query is multi-step if it requires sequential data gathering and statistical analysis, 
-    where each search builds upon previous results to examine relationships, correlations, or comparative patterns between variables.  
+  Important considerations about complex, multi-steps analytical intents:
+  - An analytical query is multi-step if it requires sequential data gathering and statistical analysis,
+    where each search builds upon previous results to examine relationships, correlations, or comparative patterns between variables.
   - Break it down into sequential steps where each represents a distinct analytical intent:
-    Template: "Step 1: <analytical intent 1>. Step 2: <analytical intent 2>. Step 3: <analytical intent 3>"  
+    Template: "Step 1: <analytical intent 1>. Step 2: <analytical intent 2>. Step 3: <analytical intent 3>"
     """
 
   sys_prompt_ambiguous = """
@@ -238,7 +222,6 @@ Important considerations about creating analytical intents:
   # Based on result, invoke appropriate chain
   if result_1['analytical_intent_clearness'] == "Analytical Intent Extracted":
         # create analytical intents
-        input_data.update({'database_content':state['database_content']})        
         result_2 = chain_2.invoke(input_data)
         # next tool to call 
         tool_name = 'create_sql_query_or_queries' 
@@ -279,13 +262,10 @@ class OutputAsAQuery(TypedDict):
 def create_sql_query_or_queries(state:State):
   """ creates sql query/queries to anwser a question based on documentation of tables and columns available """
 
-  system_prompt = """You are a sql expert and an expert data modeler.  
+  system_prompt = """You are a sql expert and an expert data modeler.
 
   Your task is to create sql scripts in {sql_dialect} dialect to answer the analytical intent(s). In each sql script, use only these tables and columns you have access to:
   {objects_documentation}.
-
-  Summary of database content:
-  {database_content}.
 
   Analytical intent(s):
   {analytical_intent}
@@ -343,7 +323,7 @@ def create_sql_query_or_queries(state:State):
 
   chain = prompt | llm.with_structured_output(OutputAsAQuery)
 
-  result = chain.invoke({'objects_documentation':state['objects_documentation'],'database_content':state['database_content'], 'analytical_intent': state['analytical_intent'],'sql_dialect':state['sql_dialect']})
+  result = chain.invoke({'objects_documentation':state['objects_documentation'], 'analytical_intent': state['analytical_intent'],'sql_dialect':state['sql_dialect']})
   show_progress(f"✅ SQL queries created:{len(result['query'])}")
   for q in result['query']:
    state['current_sql_queries'].append( {'query': q,
@@ -432,23 +412,33 @@ def extract_tables_from_sql(sql_query: str) -> list[str]:
 
 def get_date_ranges_for_tables(sql_query: str) -> list[str]:
     """Fetch date ranges for tables used in SQL query. Returns list of date range strings."""
+    from src.init.database_schema import database_schema
+
     tables = extract_tables_from_sql(sql_query)
 
     if not tables:
         return []
 
-    db_manager = get_database_manager()
+    date_ranges = []
+
     try:
-        # Build WHERE IN clause with quoted table names
-        table_list = ', '.join([f"'{t}'" for t in tables])
-        query = f"SELECT DISTINCT date_range FROM metadata_reference_table WHERE table_name IN ({table_list}) AND date_range IS NOT NULL"
+        # Iterate through database_schema to find matching tables
+        for table in database_schema:
+            table_name = table['table_name']
 
-        result_df = db_manager._execute_sql(query)
+            # Check if this table is in the SQL query
+            if any(table_name.lower() in t.lower() or t.lower() in table_name.lower() for t in tables):
+                # Check all columns for date_range queries
+                for column_name, column_info in table['columns'].items():
+                    date_query = column_info.get('query_to_get_date_range', '')
+                    if date_query and date_query.strip():
+                        # Execute the date range query
+                        results = execute_sql_query(date_query, connection_string)
+                        if results and results[0] and results[0][0] is not None:
+                            date_info = str(results[0][0])
+                            date_ranges.append(f"{table_name}, column {column_name}: {date_info}")
 
-        if result_df.empty:
-            return []
-
-        return result_df['date_range'].tolist()
+        return date_ranges
     except Exception as e:
         return []
 
@@ -500,11 +490,11 @@ class OutputAsASingleQuery(TypedDict):
   query: Annotated[str,...,"clean sql query"]
 
 
-def correct_syntax_sql_query(sql_query: str, error:str, objects_documentation: str, database_content: str, sql_dialect: str):
+def correct_syntax_sql_query(sql_query: str, error:str, objects_documentation: str, sql_dialect: str):
  """ corrects the syntax of sql query """
 
  system_prompt = """
-  Correct the following sql query which returns an error caused by wrong syntax.  
+  Correct the following sql query which returns an error caused by wrong syntax.
 
   Sql query to correct: {sql_query}.
   Error details: {error}.
@@ -512,59 +502,59 @@ def correct_syntax_sql_query(sql_query: str, error:str, objects_documentation: s
   *** Important considerations for correcting the sql query ***
       - Make sure the query is valid in {sql_dialect} dialect.
       - Use only these tables and columns you have access to: {objects_documentation}.
-      - Summary of database content: {database_content}.
       - If possible, simplify complex operations (e.g., percentile estimation) using built-in functions compatible with SQLite.
-      - Keep query performance in mind. 
+      - Keep query performance in mind.
         Example: Avoid CROSS JOIN by using a (scalar) subquery directly in CASE statements.
 
   Output the corrected version of the query.
   """
- 
+
  prompt = create_prompt_template('system', system_prompt)
  chain = prompt | llm.with_structured_output(OutputAsASingleQuery)
- result = chain.invoke({'sql_query':sql_query,'error':error,'objects_documentation':objects_documentation,'database_content':database_content, 'sql_dialect':sql_dialect})
+ result = chain.invoke({'sql_query':sql_query,'error':error,'objects_documentation':objects_documentation, 'sql_dialect':sql_dialect})
  sql_query = result['query']
  return sql_query
 
-def execute_sql_query(state:State):
+def execute_sql_query_tool(state:State):
   """ executes the sql query and retrieve the result """
-  
+
   show_progress("⚙️ Analysing results...")
-  db_manager = get_database_manager()
-  
+
   for query_index, q in enumerate(state['current_sql_queries']):
-     
-    if state['current_sql_queries'][query_index]['result'] == '':    
-     sql_query = q['query'] 
-    
+
+    if state['current_sql_queries'][query_index]['result'] == '':
+     sql_query = q['query']
+
      # refine the query 3 times if necessary.
      for i in range(3):
 
        # executes the query and if it throws an error, correct it (max 3x times) then execute it again.
        try:
-           sql_query_result_df = db_manager._execute_sql(sql_query)
-           # Convert DataFrame to string representation for compatibility
-           if sql_query_result_df.empty:
+           results = execute_sql_query(sql_query, connection_string)
+           if results is None or len(results) == 0:
                sql_query_result = "No results found."
            else:
-               sql_query_result = sql_query_result_df.to_string(index=False)
+               # Convert results to DataFrame for string representation
+               sql_query_result_df = pd.DataFrame(results)
+               sql_query_result = sql_query_result_df.to_string(index=False, header=False)
        except Exception as e:
            sql_query_result = f"Error: {str(e)}"
-       
+
        attempt = 0
-       while 'Error' in sql_query_result and attempt < 3:   
+       while 'Error' in sql_query_result and attempt < 3:
             error = sql_query_result
-            sql_query = correct_syntax_sql_query(sql_query,error,objects_documentation,database_content,state['sql_dialect'])
-            
+            sql_query = correct_syntax_sql_query(sql_query,error,objects_documentation,state['sql_dialect'])
+
             try:
-                sql_query_result_df = db_manager._execute_sql(sql_query)
-                if sql_query_result_df.empty:
+                results = execute_sql_query(sql_query, connection_string)
+                if results is None or len(results) == 0:
                     sql_query_result = "No results found."
                 else:
-                    sql_query_result = sql_query_result_df.to_string(index=False)
+                    sql_query_result_df = pd.DataFrame(results)
+                    sql_query_result = sql_query_result_df.to_string(index=False, header=False)
             except Exception as e:
                 sql_query_result = f"Error: {str(e)}"
-            
+
             attempt += 1
 
        # if the sql query does not exceed output context window return its result
@@ -582,7 +572,7 @@ def execute_sql_query(state:State):
        # if the sql query exceeds output context window and there is more room for iterations, refine the query
        else:
         show_progress(f"🔧 Refining query {query_index+1}/{len(state['current_sql_queries'])} as its output its too large...")
-        sql_query = refine_sql_query(state['analytical_intent'],sql_query,state['objects_documentation'],state['database_content'],state['sql_dialect'])['query']
+        sql_query = refine_sql_query(state['analytical_intent'],sql_query,state['objects_documentation'],state['sql_dialect'])['query']
 
        # if there is no more room for sql query iterations and the result still exceeds context window, throw a message
     else:
@@ -591,19 +581,18 @@ def execute_sql_query(state:State):
       
   return state
 
-def refine_sql_query(analytical_intent: str, sql_query: str, objects_documentation: str, database_content: str, sql_dialect:str):
+def refine_sql_query(analytical_intent: str, sql_query: str, objects_documentation: str, sql_dialect:str):
  """ refines the sql query so that its output tokens do not exceed the maximum context limit """
 
  system_prompt = """
   As a sql expert, your task is to optimize a sql query that returns more than 20 rows or exceeds the token limit.
-  
+
   You are trying to answer the following analytical intent: {analytical_intent}.
   Sql query to optimize: {sql_query}.
 
   *** Important considerations for creating the sql query ***
   - Make sure the query is valid in {sql_dialect} dialect.
   - Use only these tables and columns you have access to: {objects_documentation}.
-  - Summary of database content: {database_content}.
   
   *** Optimization Examples ***  
   
@@ -637,8 +626,8 @@ def refine_sql_query(analytical_intent: str, sql_query: str, objects_documentati
    
   
   D. Apply filters.
-     Examples: - Time-based filters: Show records for the last 3 months. Use database content to identify the temporal context for this conversation.
-              -  filter for a single company. Use database content to identify specific values. 
+     Examples: - Time-based filters: Show records for the last 3 months. Check the database schema for date range information under "Important considerations about dates available".
+              - Filter for a single company. Use values from the database schema. 
   
   E. Show top records.
      Provide a snapshot of data by retrieving maximum 20 rows and 5 columns.
@@ -658,7 +647,6 @@ def refine_sql_query(analytical_intent: str, sql_query: str, objects_documentati
  sql_query = chain.invoke({'analytical_intent': analytical_intent,
                'sql_query':sql_query,
                'objects_documentation':objects_documentation,
-               'database_content':database_content,
                'sql_dialect':sql_dialect}
                )
  return sql_query
@@ -674,13 +662,10 @@ response_guidelines = '''
   If the question is smart, reinforce the user's question to build confidence. 
     Example: "Great instinct to ask that - it's how data-savvy pros think!"
 
-  If the context allows, suggest max 2 next steps to explore further. 
+  If the context allows, suggest max 2 next steps to explore further.
   Suggest next steps that can only be achieved with the database schema you have access to:
   {objects_documentation}
 
-  Summary of database content:
-  {database_content}.
-  
   Example of next steps:
   - Trends over time:
     Example: "Want to see how this changed over time?".
@@ -697,10 +682,10 @@ response_guidelines = '''
   - Explore the data at higher granularity levels if the user analyzes on low granularity columns. Use database schema to identify such columns.
     Example: Instead of analyzing at product level, suggest at company level.
 
-  - Explore the data on filtered time ranges. Use database content to identify the temporal context for this conversation .
-    Example: Instead of analyzing for all feedback dates, suggest filtering for a year or for a few months.   
+  - Explore the data on filtered time ranges. Check the database schema for date range information under "Important considerations about dates available".
+    Example: Instead of analyzing for all feedback dates, suggest filtering for a year or for a few months.
 
-  - Filter the data on the value of a specific attribute. Use database content to identify values of important dataset attributes.
+  - Filter the data on the value of a specific attribute. Use values from the database schema.
     Example: Instead of analyzing for all companies, suggest filtering for a single company and give a few suggestions.       
 
   Close the prompt in one of these ways:
@@ -730,7 +715,6 @@ scenario_A = {
         'messages_log': state['messages_log'],
         'question': state['current_question'],
         'objects_documentation': state['objects_documentation'],
-        'database_content': state['database_content'],
         'insights': format_sql_query_results_for_prompt(state['current_sql_queries']),
         'current_sql_queries': state['current_sql_queries']
     }
@@ -751,50 +735,48 @@ scenario_B = {
     'Invoke_Params': lambda state: {
         'messages_log': state['messages_log'],
         'question': state['current_question'],
-        'objects_documentation': state['objects_documentation'],
-        'database_content': state['database_content']
+        'objects_documentation': state['objects_documentation']
     }
 }
 
-scenario_C = {  
+scenario_C = {
     'Type': 'C',
     'Description': 'request is not in db schema',
     'Prompt': """You are a decision support consultant helping users become more data-driven.
-    Continue the conversation from the last user prompt. 
-    
+    Continue the conversation from the last user prompt.
+
     Conversation history:
     {messages_log}.
 
     Last user prompt:
     {question}.
-    
+
     Unfortunately, the requested information from last prompt is not available in our database. Here are the details: {notes}.
-    
+
     Use the response guidelines below to explain what information is not available by suggesting alternative analyses that can be performed with the available data.""" + '\n\n' + response_guidelines.strip(),
     'Invoke_Params': lambda state: {
         'messages_log': state['messages_log'],
         'question': state['current_question'],
         'objects_documentation': state['objects_documentation'],
-        'database_content': state['database_content'],
         'notes': state['generate_answer_details']['notes']
     }
 }
 
-scenario_D = {  
+scenario_D = {
     'Type': 'D',
     'Description': 'Analytical intent ambiguous',
     'Prompt': """You are a decision support consultant helping users become more data-driven.
-    
-    Continue the conversation from the last user prompt. 
-    
+
+    Continue the conversation from the last user prompt.
+
     Conversation history:
     {messages_log}.
 
     Last user prompt:
     {question}.
-    
+
     The last user prompt could be interpreted in multiple ways. Here's what makes it ambiguous: {notes}.
-    
+
     Acknowledge what makes the question ambiguous, present different options as possible interpretations and ask the user to specify which analysis it wants.
 
     """ + '\n\n' + response_guidelines.strip(),
@@ -802,7 +784,6 @@ scenario_D = {
         'messages_log': state['messages_log'],
         'question': state['current_question'],
         'objects_documentation': state['objects_documentation'],
-        'database_content': state['database_content'],
         'notes': state['generate_answer_details']['notes']
     }
 }
@@ -1036,7 +1017,7 @@ def run_control_flow(state:State):
     # creating & executing new queries
     elif tool_name == 'create_sql_query_or_queries':
       state = create_sql_query_or_queries.invoke({'state':state})
-      execute_sql_query(state)
+      execute_sql_query_tool(state)
 
     # generate answer & manage chat history.
     elif tool_name == 'generate_answer':  
@@ -1055,7 +1036,6 @@ def reset_state(state:State):
     state['generate_answer_details'] = {}
     state['analytical_intent'] = []
     state['objects_documentation'] = objects_documentation
-    state['database_content'] = database_content
     state['sql_dialect'] = sql_dialect
     return state
 

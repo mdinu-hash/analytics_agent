@@ -64,8 +64,9 @@ Create a business_glossary.py file in the src\init folder with 3 data structures
 ]
 ```
 
-Add a **check_glossary_consistency()** function that validates all terms in synonyms and related_terms exist in key_terms.
+Populate the business_glossary.py and database_schema.py files with the values from file update_objects_metadata_snowflake.py -> list metadata_updates.
 
+Add a **check_glossary_consistency()** function that validates all terms in synonyms and related_terms exist in key_terms.
 
 def check_glossary_consistency():
     """
@@ -106,42 +107,56 @@ def check_glossary_consistency():
     else:
         print("✅ All terms in synonyms and related_terms exist in key_terms")
 
+- The values in database_schema and business glossary should be copied from the update_objects_metadata_snowflake.py script, where at the end is the metadata_updates list.
 
-- Cleanup & Adjustment - Database Utility Functions
+- Database Utility Functions
 
-**Get rid of class DemoDatabaseMetadataManager** from demo_database_util.py.
+**For databricks_util.py (Databricks environment):**
 
-**Add these utility functions to demo_database_util.py:**
+**Add execute_sql_query utility function** at the top of databricks_util.py:
 
 ```python
-@contextmanager
-def get_db_connection(connection_string):
-    """Context manager for database connections."""
-    conn = None
-    try:
-        conn = psycopg2.connect(connection_string)
-        yield conn
-    finally:
-        if conn:
-            conn.close()
-
-def execute_sql_query(query, connection_string):
+def execute_sql_query(query: str, warehouse_id: str, params: Dict = None) -> List[tuple]:
     """
-    Execute a SQL query and return results.
+    Execute a SQL query using Databricks SDK with native authentication.
 
     Args:
         query: SQL query string to execute
-        connection_string: PostgreSQL connection string
+        warehouse_id: Databricks SQL warehouse ID
+        params: Optional dict of parameters to replace in query (e.g., {'catalog': 'main'})
 
     Returns:
-        List of results (each row as a tuple), or None if query fails
+        List of tuples (each row as a tuple), or None if query fails
+
+    Note: Uses native Databricks authentication (WorkspaceClient).
+    When deployed as Model Serving Endpoint, runs with service principal permissions.
     """
     try:
-        with get_db_connection(connection_string) as conn:
-            cursor = conn.cursor()
-            cursor.execute(query)
-            results = cursor.fetchall()
-            return results
+        # Native Databricks Authentication (uses current user/service principal credentials)
+        w = WorkspaceClient()
+
+        # Replace parameters in query if provided
+        if params:
+            for key, value in params.items():
+                if isinstance(value, str):
+                    escaped_value = value.replace("'", "''")
+                    query = query.replace(f":{key}", f"'{escaped_value}'")
+                else:
+                    query = query.replace(f":{key}", str(value))
+
+        # Execute query using Databricks SDK
+        response = w.statement_execution.execute_statement(
+            statement=query,
+            warehouse_id=warehouse_id,
+            wait_timeout="50s"
+        )
+
+        # Convert to list of tuples for consistency with PostgreSQL version
+        if response.result and response.result.data_array:
+            return [tuple(row) for row in response.result.data_array]
+        else:
+            return []
+
     except Exception as e:
         print(f"Error executing query: {e}")
         return None
@@ -149,16 +164,98 @@ def execute_sql_query(query, connection_string):
 
 - Create objects_documentation builder function
 
-**Create create_objects_documentation() function** in initialization.py (based on dev notebook cell-2):
-This function builds the comprehensive database schema context string by:
-1. Looping through database_schema and adding all tables with columns
-2. Executing query_to_get_column_values for each column to retrieve actual values
-3. Collecting date range information from query_to_get_date_range queries
-4. Adding all table relationships from table_relationships list
-5. Adding date range information as "Important considerations about dates available"
-6. Adding key terms with query instructions
+**Create create_objects_documentation() function** in databricks_util.py:
 
-The output variable should be named **objects_documentation** (replacing the old one).
+The function signature:
+```python
+def create_objects_documentation(database_schema, table_relationships, key_terms, warehouse_id):
+    """
+    Build comprehensive database schema context string.
+
+    Args:
+        database_schema: List of table dictionaries with columns
+        table_relationships: List of relationship dictionaries
+        key_terms: List of business term dictionaries
+        warehouse_id: Databricks SQL warehouse ID
+
+    Returns:
+        str: Formatted documentation string
+    """
+    objects_documentation = []
+    date_range_entries = []
+
+    # Add all tables with all their columns AND values
+    for table in database_schema:
+        table_name = table['table_name']
+        table_desc = table['table_description']
+
+        # Start with table info
+        table_text = f"Table {table_name}: {table_desc}\n"
+        table_text += "Columns:\n"
+
+        # Add all columns for this table
+        for column_name, column_info in table['columns'].items():
+            table_text += f"  - Column {column_name}: {column_info['description']}\n"
+
+            # Check if column has a query to get values
+            query = column_info.get('query_to_get_column_values', '')
+            if query and query.strip():
+                # Execute query to get column values
+                results = execute_sql_query(query, warehouse_id)
+                if results:
+                    # Extract values from results
+                    column_values = []
+                    for row in results:
+                        if row and row[0] is not None:
+                            column_values.append(str(row[0]))
+
+                    # Add values as pipe-separated string
+                    values_str = ' | '.join(column_values)
+                    table_text += f"    Values in column {column_name}: {values_str}\n"
+
+            # Check if column has a query to get date range
+            date_query = column_info.get('query_to_get_date_range', '')
+            if date_query and date_query.strip():
+                # Execute query to get date range
+                results = execute_sql_query(date_query, warehouse_id)
+                if results and results[0] and results[0][0] is not None:
+                    date_info = str(results[0][0])
+                    date_range_entries.append(f"  - Table {table_name}, column {column_name}: {date_info}\n")
+
+        objects_documentation.append(table_text)
+
+    # Add ALL table relationships
+    relationships_text = "\nRelationships between Tables:\n"
+    for rel in table_relationships:
+        relationships_text += f"  {rel['key1']} -> {rel['key2']}\n"
+    objects_documentation.append(relationships_text)
+
+    # Add date range information
+    if date_range_entries:
+        date_range = "\nImportant considerations about dates available:\n"
+        date_range += "".join(date_range_entries)
+        objects_documentation.append(date_range)
+
+    # Add key terms with query instructions
+    key_terms_text = "\nQuery instructions for key terms:\n"
+    for term in key_terms:
+        term_name = term['name']
+        term_definition = term['definition']
+        query_instructions = term['query_instructions']
+
+        if term_definition:
+            key_terms_text += f"  - {term_name}: {term_definition}\n"
+        else:
+            key_terms_text += f"  - {term_name}\n"
+
+        if query_instructions:
+            key_terms_text += f"    {query_instructions}\n"
+
+    objects_documentation.append(key_terms_text)
+
+    # Join all parts
+    return "\n".join(objects_documentation)
+```
 
 - Update initialization.py imports and initialization
 
@@ -170,13 +267,11 @@ from src.init.business_glossary import key_terms, synonyms, related_terms, check
 # Run consistency check after import
 check_glossary_consistency()
 
-# Create objects documentation
+# Update objects documentation from databricks_util.py
 objects_documentation = create_objects_documentation(database_schema, table_relationships, key_terms, connection_string)
 ```
-
-- Remove database_content variable completely
-
 **Delete database_content** variable from:
+- function get_database_content from databricks_util.py
 - initialization.py
 - agent.py (remove from imports and State class)
 - app.py (remove from any references)
@@ -184,14 +279,24 @@ objects_documentation = create_objects_documentation(database_schema, table_rela
 **Update prompts** that use database_content:
 - sys_prompt_clear: remove "Summary of database content: {database_content}."
 - create_sql_query_or_queries: remove database_content
-- correct_syntax_sql_query: remove database_content
-- Any other chains that reference it
+- correct_syntax_sql_query: remove database_content parameter and function signature
+- refine_sql_query: remove database_content parameter and function signature
+- All scenario Invoke_Params (A, B, C, D): remove database_content
+- response_guidelines: remove "Summary of database content: {database_content}." section and update references to use database schema instead
 
-- Delete obsolete files
+**Important**: In agent.py, rename the existing `execute_sql_query(state:State)` function to `execute_sql_query_tool(state:State)` to avoid naming conflict with the new utility function from demo_database_util.py. Update the function to use the new `execute_sql_query(query, connection_string)` utility function and convert results to DataFrame for display.
 
-Delete these files:
-- run_update_objects_metadata_demo.ipynb
-- update_objects_metadata_demo_db.py 
+**Update get_date_ranges_for_tables() function** in agent.py:
+This function previously queried `metadata_reference_table` using `get_database_manager()`. Update it to:
+1. Import `database_schema` from src.init.database_schema
+2. Remove `get_database_manager()` call and old SQL query to metadata_reference_table
+3. Iterate through database_schema list to find tables matching those in the SQL query
+4. For each matching table, check all columns for `query_to_get_date_range`
+5. Execute those queries using `execute_sql_query(query, connection_string)` utility function
+6. Format results as: `"{table_name}, column {column_name}: {date_info}"`
+
+- Delete update_objects_metadata_snowflake.py and the init_snowflake_database folder.
+**Get rid of class DatabricksMetadataManager** from databricks_util.py.
 
 #2 Prep & cleanup
 These are tasks making the agent simpler & more organized for this future task: Implement consistency of terms usage
