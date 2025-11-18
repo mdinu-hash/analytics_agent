@@ -127,15 +127,15 @@ def execute_query(query, connection_string):
     Returns:
         List of results (each row as a tuple), or None if query fails
     """
-    try:
-        with get_db_connection(connection_string) as conn:
-            cursor = conn.cursor()
+    with get_db_connection(connection_string) as conn:
+        cursor = conn.cursor()
+        try:
             cursor.execute(query)
             results = cursor.fetchall()
             return results
-    except Exception as e:
-        print(f"Error executing query: {e}")
-        return None
+        except Exception as e:
+            print(f"Error executing query: {e}")
+            return None
 ```
 
 **For databricks_util.py (Databricks environment):**
@@ -143,14 +143,14 @@ def execute_query(query, connection_string):
 **Add execute_query utility function** at the top of databricks_util.py:
 
 ```python
-def execute_query(query: str, warehouse_id: str, params: Dict = None) -> List[tuple]:
+def execute_query(query: str, warehouse_id: str) -> List[tuple]:
     """
     Execute a SQL query using Databricks SDK with native authentication.
 
     Args:
-        query: SQL query string to execute
+        query: SQL query string to execute. Tables should be fully qualified as
+               `catalog_name`.`schema_name`.`table_name`
         warehouse_id: Databricks SQL warehouse ID
-        params: Optional dict of parameters to replace in query (e.g., {'catalog': 'main'})
 
     Returns:
         List of tuples (each row as a tuple), or None if query fails
@@ -158,19 +158,10 @@ def execute_query(query: str, warehouse_id: str, params: Dict = None) -> List[tu
     Note: Uses native Databricks authentication (WorkspaceClient).
     When deployed as Model Serving Endpoint, runs with service principal permissions.
     """
+    # Native Databricks Authentication (uses current user/service principal credentials)
+    w = WorkspaceClient()
+
     try:
-        # Native Databricks Authentication (uses current user/service principal credentials)
-        w = WorkspaceClient()
-
-        # Replace parameters in query if provided
-        if params:
-            for key, value in params.items():
-                if isinstance(value, str):
-                    escaped_value = value.replace("'", "''")
-                    query = query.replace(f":{key}", f"'{escaped_value}'")
-                else:
-                    query = query.replace(f":{key}", str(value))
-
         # Execute query using Databricks SDK
         response = w.statement_execution.execute_statement(
             statement=query,

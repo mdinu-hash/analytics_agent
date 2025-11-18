@@ -23,15 +23,15 @@ def execute_query(query, connection_string):
     Returns:
         List of results (each row as a tuple), or None if query fails
     """
-    try:
-        with get_db_connection(connection_string) as conn:
-            cursor = conn.cursor()
+    with get_db_connection(connection_string) as conn:
+        cursor = conn.cursor()
+        try:
             cursor.execute(query)
             results = cursor.fetchall()
             return results
-    except Exception as e:
-        print(f"Error executing query: {e}")
-        return None
+        except Exception as e:
+            print(f"Error executing query: {e}")
+            return None
 
 def create_objects_documentation(database_schema, table_relationships, key_terms, connection_string):
     """
