@@ -114,8 +114,11 @@ creates variables objects_documentation, database_content, sql_dialect.
 
 ### database_schema
 
+#### column_values
+add here the values of columns that do not change frequently and are static. separate values by tab delimiter (" | ")
+
 #### query_to_get_column_values
-populate this for the attributes that are important for suggesting detailed analysis on those attributes, or for knowing the key values stored in these columns (ex specific client segments).
+populate this for the attributes that are important for suggesting detailed analysis on those attributes, or for knowing the key values stored in these columns (ex specific client segments). You populate this field for attributes whose values are not static and needs to be refreshed at least monthly.
 
 It's used for the agent to understand which column to query based on specific values ("what about BDM?" - BDM being a client segment, the agent has to know it's part of the respective columns).
 
@@ -123,11 +126,13 @@ It's also used for the agent to suggest next steps.
 
 #### date_range.
 Used to make the agent aware of which dates are available in the database.
+The result of the query will be 1:1 shown in key assumptions if the underlying table is queried.
+Populate this field for date fields that are refreshed at least monthly.
 
 ### business_glossary
 
 #### key_terms:
-- in the query_instructions key, add instructions on how to query. 
+- in the query_instructions key, add instructions on how to query. Add the filters exactly how the agent should query. for example, add '' between static values like status = 'Open'.
 - use active, direct language like "to get recent records, filter for account.account_status = 'Active'"
 - whenever you mention a column, specify in this format: table_name.column_name
 - add here filters and transformations for querying certain terms.

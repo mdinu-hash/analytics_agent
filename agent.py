@@ -411,7 +411,14 @@ def extract_tables_from_sql(sql_query: str) -> list[str]:
 
 
 def get_date_ranges_for_tables(sql_query: str) -> list[str]:
-    """Fetch date ranges for tables used in SQL query. Returns list of date range strings."""
+    """
+    Fetch date ranges for tables used in SQL query from pre-filled database_schema.
+
+    Note: This function now reads from pre-filled date_range fields in database_schema.
+    Make sure fill_database_schema() was called during initialization.
+
+    Returns list of date range strings.
+    """
     from src.init.database_schema import database_schema
 
     tables = extract_tables_from_sql(sql_query)
@@ -428,15 +435,11 @@ def get_date_ranges_for_tables(sql_query: str) -> list[str]:
 
             # Check if this table is in the SQL query
             if any(table_name.lower() in t.lower() or t.lower() in table_name.lower() for t in tables):
-                # Check all columns for date_range queries
+                # Check all columns for pre-filled date_range values
                 for column_name, column_info in table['columns'].items():
-                    date_query = column_info.get('query_to_get_date_range', '')
-                    if date_query and date_query.strip():
-                        # Execute the date range query
-                        results = execute_query(date_query, connection_string)
-                        if results and results[0] and results[0][0] is not None:
-                            date_info = str(results[0][0])
-                            date_ranges.append(f"{table_name}, column {column_name}: {date_info}")
+                    date_range = column_info.get('date_range', '').strip()
+                    if date_range:
+                        date_ranges.append(f"{table_name}, column {column_name}: {date_range}")
 
         return date_ranges
     except Exception as e:

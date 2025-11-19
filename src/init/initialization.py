@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from langchain.callbacks.tracers.langchain import LangChainTracer
-from src.init.init_demo_database.demo_database_util import create_objects_documentation
+from src.init.init_demo_database.demo_database_util import fill_database_schema, create_objects_documentation
 from src.init.llm_util import llm_provider
 from src.init.database_schema import database_schema, table_relationships
 from src.init.business_glossary import key_terms, synonyms, related_terms, check_glossary_consistency
@@ -80,8 +80,11 @@ def create_config(run_name: str, is_new_thread_id: bool = False, thread_id: str 
 # Run consistency check after import
 check_glossary_consistency()
 
-# Create objects documentation
-objects_documentation = create_objects_documentation(database_schema, table_relationships, key_terms, connection_string)
+# Fill database schema with column values and date ranges (optimized batch queries)
+fill_database_schema(database_schema, connection_string)
+
+# Create objects documentation (uses pre-filled values, no queries)
+objects_documentation = create_objects_documentation(database_schema, table_relationships, key_terms)
 
 # Set SQL dialect for PostgreSQL demo database
 sql_dialect = 'PostgreSQL'
