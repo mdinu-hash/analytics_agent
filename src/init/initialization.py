@@ -39,8 +39,8 @@ tracer = LangChainTracer(project_name=langsmith_project_name)
 
 # Initialize LLM models based on provider
 if llm_provider == 'anthropic':
-    llm = ChatAnthropic(model='claude-sonnet-4-20250514', temperature=0)  # Smart & expensive
-    llm_fast = ChatAnthropic(model='claude-sonnet-4-20250514', temperature=0)  # Faster
+    llm = ChatAnthropic(model='claude-sonnet-4-5-20250929', temperature=0)  # Smart & expensive
+    llm_fast = ChatAnthropic(model='claude-sonnet-4-5-20250929', temperature=0)  # Faster
 elif llm_provider == 'openai':
     llm = ChatOpenAI(model='gpt-4o', temperature=0)  # Smart & expensive
     llm_fast = ChatOpenAI(model='gpt-4o-mini', temperature=0)  # Faster
