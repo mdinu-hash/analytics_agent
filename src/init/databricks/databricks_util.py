@@ -9,7 +9,7 @@ import mlflow.langchain
 import datetime
 import uuid
 
-def execute_query(query: str, warehouse_id: str) -> List[tuple]:
+def execute_query(query: str, warehouse_id: str) -> Dict:
     """
     Execute a SQL query using Databricks SDK with native authentication.
 
@@ -19,31 +19,40 @@ def execute_query(query: str, warehouse_id: str) -> List[tuple]:
         warehouse_id: Databricks SQL warehouse ID
 
     Returns:
-        List of tuples (each row as a tuple), or None if query fails
+        Dict with keys:
+            - 'success' (bool): Whether query executed successfully
+            - 'data' (pd.DataFrame | None): Query results as DataFrame
+            - 'error' (str | None): Error message if failed
 
     Note: Uses native Databricks authentication (WorkspaceClient).
     When deployed as Model Serving Endpoint, runs with service principal permissions.
     """
-    # Native Databricks Authentication (uses current user/service principal credentials)
     w = WorkspaceClient()
 
-    try:
-        # Execute query using Databricks SDK
-        response = w.statement_execution.execute_statement(
-            statement=query,
-            warehouse_id=warehouse_id,
-            wait_timeout="50s"
-        )
+    response = w.statement_execution.execute_statement(
+        statement=query,
+        warehouse_id=warehouse_id,
+        wait_timeout="50s"
+    )
 
-        # Convert to list of tuples for consistency with PostgreSQL version
-        if response.result and response.result.data_array:
-            return [tuple(row) for row in response.result.data_array]
-        else:
-            return []
+    # Check if query execution failed
+    if response.status.state == StatementState.FAILED:
+        return {
+            'success': False,
+            'data': None,
+            'error': response.status.error.message
+        }
+    else:
+        # Query executed successfully - convert to DataFrame
+        columns = [col.name for col in response.manifest.schema.columns]
+        data = response.result.data_array if response.result else []
+        df = pd.DataFrame(data, columns=columns)
 
-    except Exception as e:
-        print(f"Error executing query: {e}")
-        return None
+        return {
+            'success': True,
+            'data': df,
+            'error': None
+        }   
 
 def fill_database_schema(database_schema, warehouse_id):
     """
@@ -88,57 +97,59 @@ def fill_database_schema(database_schema, warehouse_id):
 
     # Execute column value queries with UNION ALL
     if column_value_queries:
+        logging.info(f"Executing {len(column_value_queries)} column value queries in a single batch...")
         union_parts = []
         for item in column_value_queries:
             # Wrap each query to add an identifier column
             union_parts.append(f"SELECT '{item['identifier']}' AS _identifier, CAST(value AS STRING) AS value FROM ({item['query']}) AS subq(value)")
 
         batch_query = " UNION ALL ".join(union_parts)
+        result = execute_query(batch_query, warehouse_id)
 
-        results = execute_query(batch_query, warehouse_id)
+        if result['success']:
+            df = result['data']
 
-        if results:
-            # Organize results by identifier
-            results_dict = {}
-            for row in results:
-                identifier = row[0]
-                value = row[1]
-                if identifier not in results_dict:
-                    results_dict[identifier] = []
-                if value is not None:
-                    results_dict[identifier].append(str(value))
+            # Use pandas groupby for performance (faster than loops)
+            if df is not None and not df.empty:
+                grouped = df.groupby('_identifier')['value'].apply(
+                    lambda x: ' | '.join(x.dropna().astype(str))
+                ).to_dict()
 
-            # Fill the database_schema with results
-            for item in column_value_queries:
-                identifier = item['identifier']
-                if identifier in results_dict:
-                    values_str = ' | '.join(results_dict[identifier])
-                    database_schema[item['table_idx']]['columns'][item['column_name']]['column_values'] = values_str
+                # Fill the database_schema with results
+                for item in column_value_queries:
+                    identifier = item['identifier']
+                    if identifier in grouped:
+                        database_schema[item['table_idx']]['columns'][item['column_name']]['column_values'] = grouped[identifier]
+        else:
+            logging.error(f"Column value queries failed: {result['error']}")
 
     # Execute date range queries with UNION ALL
     if date_range_queries:
-        print(f"Executing {len(date_range_queries)} date range queries in a single batch...")
+        logging.info(f"Executing {len(date_range_queries)} date range queries in a single batch...")
         union_parts = []
         for item in date_range_queries:
             # Wrap each query to add an identifier column
             union_parts.append(f"SELECT '{item['identifier']}' AS _identifier, CAST(value AS STRING) AS value FROM ({item['query']}) AS subq(value)")
 
         batch_query = " UNION ALL ".join(union_parts)
+        result = execute_query(batch_query, warehouse_id)
 
-        results = execute_query(batch_query, warehouse_id)
+        if result['success']:
+            df = result['data']
 
-        if results:
-            # Fill the database_schema with results
-            for row in results:
-                identifier = row[0]
-                value = row[1]
+            # Use pandas set_index for performance (O(1) lookup vs O(n) loops)
+            if df is not None and not df.empty:
+                date_mapping = df.set_index('_identifier')['value'].to_dict()
 
-                # Find the matching item
+                # Fill the database_schema with results
                 for item in date_range_queries:
-                    if item['identifier'] == identifier and value is not None:
-                        database_schema[item['table_idx']]['columns'][item['column_name']]['date_range'] = str(value)
-                        break
+                    identifier = item['identifier']
+                    if identifier in date_mapping and date_mapping[identifier] is not None:
+                        database_schema[item['table_idx']]['columns'][item['column_name']]['date_range'] = str(date_mapping[identifier])
+        else:
+            logging.error(f"Date range queries failed: {result['error']}")
 
+    logging.info("Database schema filling completed!")
     return database_schema
 
 def create_objects_documentation(database_schema, table_relationships, key_terms, warehouse_id=None):

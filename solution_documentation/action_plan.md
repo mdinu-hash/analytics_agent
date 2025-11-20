@@ -1,8 +1,6 @@
 
 #1 Create glossaries and db schema file.
 
-### Create fill_database_schema() function (src/init/databricks/databricks_util.py)
-
 def fill_database_schema(database_schema, warehouse_id):
     """
     Fill column_values and date_range fields in database_schema using optimized batch queries.
@@ -46,176 +44,60 @@ def fill_database_schema(database_schema, warehouse_id):
 
     # Execute column value queries with UNION ALL
     if column_value_queries:
+        logging.info(f"Executing {len(column_value_queries)} column value queries in a single batch...")
         union_parts = []
         for item in column_value_queries:
             # Wrap each query to add an identifier column
             union_parts.append(f"SELECT '{item['identifier']}' AS _identifier, CAST(value AS STRING) AS value FROM ({item['query']}) AS subq(value)")
 
         batch_query = " UNION ALL ".join(union_parts)
+        result = execute_query(batch_query, warehouse_id)
 
-        results = execute_query(batch_query, warehouse_id)
+        if result['success']:
+            df = result['data']
 
-        if results:
-            # Organize results by identifier
-            results_dict = {}
-            for row in results:
-                identifier = row[0]
-                value = row[1]
-                if identifier not in results_dict:
-                    results_dict[identifier] = []
-                if value is not None:
-                    results_dict[identifier].append(str(value))
+            # Use pandas groupby for performance (faster than loops)
+            if df is not None and not df.empty:
+                grouped = df.groupby('_identifier')['value'].apply(
+                    lambda x: ' | '.join(x.dropna().astype(str))
+                ).to_dict()
 
-            # Fill the database_schema with results
-            for item in column_value_queries:
-                identifier = item['identifier']
-                if identifier in results_dict:
-                    values_str = ' | '.join(results_dict[identifier])
-                    database_schema[item['table_idx']]['columns'][item['column_name']]['column_values'] = values_str
+                # Fill the database_schema with results
+                for item in column_value_queries:
+                    identifier = item['identifier']
+                    if identifier in grouped:
+                        database_schema[item['table_idx']]['columns'][item['column_name']]['column_values'] = grouped[identifier]
+        else:
+            logging.error(f"Column value queries failed: {result['error']}")
 
     # Execute date range queries with UNION ALL
     if date_range_queries:
-        print(f"Executing {len(date_range_queries)} date range queries in a single batch...")
+        logging.info(f"Executing {len(date_range_queries)} date range queries in a single batch...")
         union_parts = []
         for item in date_range_queries:
             # Wrap each query to add an identifier column
             union_parts.append(f"SELECT '{item['identifier']}' AS _identifier, CAST(value AS STRING) AS value FROM ({item['query']}) AS subq(value)")
 
         batch_query = " UNION ALL ".join(union_parts)
+        result = execute_query(batch_query, warehouse_id)
 
-        results = execute_query(batch_query, warehouse_id)
+        if result['success']:
+            df = result['data']
 
-        if results:
-            # Fill the database_schema with results
-            for row in results:
-                identifier = row[0]
-                value = row[1]
+            # Use pandas set_index for performance (O(1) lookup vs O(n) loops)
+            if df is not None and not df.empty:
+                date_mapping = df.set_index('_identifier')['value'].to_dict()
 
-                # Find the matching item
+                # Fill the database_schema with results
                 for item in date_range_queries:
-                    if item['identifier'] == identifier and value is not None:
-                        database_schema[item['table_idx']]['columns'][item['column_name']]['date_range'] = str(value)
-                        break
-
-    return database_schema
-
-add it to run before create objects documentation in initialization file and after check glossary validation
-
-### Updated create_objects_documentation() (src/init/databricks/databricks_util.py)
-
-def create_objects_documentation(database_schema, table_relationships, key_terms, warehouse_id=None):
-    """
-    Build comprehensive database schema context string.
-
-    Note: This function now expects database_schema to have pre-filled column_values
-    and date_range fields. Use fill_database_schema() before calling this function.
-
-    Args:
-        database_schema: List of table dictionaries with columns (with pre-filled values)
-        table_relationships: List of relationship dictionaries
-        key_terms: List of business term dictionaries
-        warehouse_id: DEPRECATED - No longer used. Kept for backward compatibility.
-
-    Returns:
-        str: Formatted documentation string
-    """
-    objects_documentation = []
-    date_range_entries = []
-
-    # Add all tables with all their columns AND values
-    for table in database_schema:
-        table_name = table['table_name']
-        table_desc = table['table_description']
-
-        # Start with table info
-        table_text = f"Table {table_name}: {table_desc}\n"
-        table_text += "Columns:\n"
-
-        # Add all columns for this table
-        for column_name, column_info in table['columns'].items():
-            table_text += f"  - Column {column_name}: {column_info['description']}\n"
-
-            # Use pre-filled column_values
-            column_values = column_info.get('column_values', '').strip()
-            if column_values:
-                table_text += f"    Values in column {column_name}: {column_values}\n"
-
-            # Use pre-filled date_range
-            date_range = column_info.get('date_range', '').strip()
-            if date_range:
-                date_range_entries.append(f"  - Table {table_name}, column {column_name}: {date_range}\n")
-
-        objects_documentation.append(table_text)
-
-    # Add ALL table relationships
-    relationships_text = "\nRelationships between Tables:\n"
-    for rel in table_relationships:
-        relationships_text += f"  {rel['key1']} -> {rel['key2']}\n"
-    objects_documentation.append(relationships_text)
-
-    # Add date range information
-    if date_range_entries:
-        date_range = "\nImportant considerations about dates available:\n"
-        date_range += "".join(date_range_entries)
-        objects_documentation.append(date_range)
-
-    # Add key terms with query instructions
-    key_terms_text = "\nQuery instructions for key terms:\n"
-    for term in key_terms:
-        term_name = term['name']
-        term_definition = term['definition']
-        query_instructions = term['query_instructions']
-
-        if term_definition:
-            key_terms_text += f"  - {term_name}: {term_definition}\n"
+                    identifier = item['identifier']
+                    if identifier in date_mapping and date_mapping[identifier] is not None:
+                        database_schema[item['table_idx']]['columns'][item['column_name']]['date_range'] = str(date_mapping[identifier])
         else:
-            key_terms_text += f"  - {term_name}\n"
+            logging.error(f"Date range queries failed: {result['error']}")
 
-        if query_instructions:
-            key_terms_text += f"    {query_instructions}\n"
-
-    objects_documentation.append(key_terms_text)
-
-    # Join all parts
-    return "\n".join(objects_documentation)
-
-### Updated get_date_ranges_for_tables() (agent.py)
-
-def get_date_ranges_for_tables(sql_query: str) -> list[str]:
-    """
-    Fetch date ranges for tables used in SQL query from pre-filled database_schema.
-
-    Note: This function now reads from pre-filled date_range fields in database_schema.
-    Make sure fill_database_schema() was called during initialization.
-
-    Returns list of date range strings.
-    """
-    from src.init.database_schema import database_schema
-
-    tables = extract_tables_from_sql(sql_query)
-
-    if not tables:
-        return []
-
-    date_ranges = []
-
-    try:
-        # Iterate through database_schema to find matching tables
-        for table in database_schema:
-            table_name = table['table_name']
-
-            # Check if this table is in the SQL query
-            if any(table_name.lower() in t.lower() or t.lower() in table_name.lower() for t in tables):
-                # Check all columns for pre-filled date_range values
-                for column_name, column_info in table['columns'].items():
-                    date_range = column_info.get('date_range', '').strip()
-                    if date_range:
-                        date_ranges.append(f"{table_name}, column {column_name}: {date_range}")
-
-        return date_ranges
-    except Exception as e:
-        return []
-
+    logging.info("Database schema filling completed!")
+    return database_schema
 
 #2 Prep & cleanup
 These are tasks making the agent simpler & more organized for this future task: Implement consistency of terms usage
