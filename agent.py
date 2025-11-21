@@ -1034,6 +1034,7 @@ def reset_state(state:State):
     state['llm_answer'] = AIMessage(content='')
     state['generate_answer_details'] = {'key_assumptions': []}
     state['analytical_intent'] = []
+    state['scenario'] = ''
     state['objects_documentation'] = objects_documentation
     state['sql_dialect'] = sql_dialect
     return state
