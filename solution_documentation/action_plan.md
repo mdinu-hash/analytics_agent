@@ -8,17 +8,78 @@ These are tasks making the agent simpler & more organized for this future task: 
 
 Implementation details:
 - Add 'scenario: str' field to State TypedDict in agent.py
+- **CRITICAL**: Initialize scenario to empty string (NOT None) in multiple locations:
+
+  1. **In reset_state function**:
+     * Add: state['scenario'] = ''
+
+  2. **In orchestrator function (line ~964)**:
+     * When result['next_step'] == 'Continue', set: scenario = '' (NOT None)
+     * **This is critical!** Setting to None will cause validation errors
+     * Reason: The orchestrator runs and can overwrite the initialized value
+
+  3. **In app.py state_dict initialization** (~line 682):
+     * Add: 'scenario': ''
+
+  4. **In test notebooks test_state initialization**:
+     * Add: 'scenario': ''
+
 - Update all write locations where scenario is assigned:
   * extract_analytical_intent function (output['scenario'])
-  * orchestrator function (scenario variable assignment)
+  * orchestrator function (scenario variable assignment - lines 964, 971, 977, 988)
+  * Final write: state['scenario'] = scenario (line 992)
+
 - Update all read locations where scenario is accessed:
   * generate_answer function (state['generate_answer_details']['scenario'] → state['scenario'])
   * create_final_message nested function in generate_answer
   * databricks_util.py in log_to_mlflow function (for MLflow logging)
+
 - Change from: state['generate_answer_details']['scenario']
-  To: state['scenario'] 
+  To: state['scenario']
+
+**Common Pitfall**: If you see "Input should be a valid string [type=string_type, input_value=None]" error, it means somewhere in the code scenario is being set to None instead of '' (empty string). Check the orchestrator function! 
 
 3) Move Key Assumptions into generate_answer_details:
+
+**IMPORTANT - Initialize all keys in ALL state creation locations:**
+State initialization must be complete in MULTIPLE locations to prevent validation errors:
+
+1. **In reset_state function (agent.py ~line 1035)**:
+```python
+state['generate_answer_details'] = {
+    'key_assumptions': [],
+    'agent_questions': [],
+    'ambiguity_explanation': ''
+}
+state['scenario'] = ''
+```
+
+2. **In app.py when invoking the graph (app.py ~line 676)**:
+```python
+state_dict = {
+    'objects_documentation': objects_documentation,
+    'sql_dialect': sql_dialect,
+    'messages_log': messages_log,
+    'intermediate_steps': [],
+    'analytical_intent': [],
+    'current_question': prompt,
+    'current_sql_queries': [],
+    'generate_answer_details': {
+        'key_assumptions': [],
+        'agent_questions': [],
+        'ambiguity_explanation': ''
+    },
+    'llm_answer': AIMessage(content=''),
+    'scenario': ''
+}
+```
+
+3. **In test notebooks when creating test_state**:
+Same structure as app.py above - must include all keys.
+
+This ensures all keys exist from the start, preventing both:
+- LangGraph validation errors (missing required State fields)
+- KeyError at runtime (missing dict keys)
 
 Current Implementation:
 - 'explanation' key exists in each item of state['current_sql_queries']

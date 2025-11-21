@@ -961,7 +961,7 @@ def orchestrator(state:State):
                          'objects_documentation':state['objects_documentation']
                          })   
     if result['next_step'] == 'Continue':
-      scenario = None
+      scenario = ''  # empty string
       agent_questions = None
       next_tool_name = get_next_tool(state)
       pass
@@ -1032,7 +1032,11 @@ def reset_state(state:State):
     state['current_sql_queries'] = []
     state['intermediate_steps'] = []
     state['llm_answer'] = AIMessage(content='')
-    state['generate_answer_details'] = {'key_assumptions': []}
+    state['generate_answer_details'] = {
+        'key_assumptions': [],
+        'agent_questions': [],
+        'ambiguity_explanation': ''
+    }
     state['analytical_intent'] = []
     state['scenario'] = ''
     state['objects_documentation'] = objects_documentation

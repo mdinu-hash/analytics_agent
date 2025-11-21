@@ -673,8 +673,13 @@ with tab1:
                     'analytical_intent': [],
                     'current_question': prompt,
                     'current_sql_queries': [],
-                    'generate_answer_details': {},
-                    'llm_answer': AIMessage(content='')
+                    'generate_answer_details': {
+                        'key_assumptions': [],
+                        'agent_questions': [],
+                        'ambiguity_explanation': ''
+                    },
+                    'llm_answer': AIMessage(content=''),
+                    'scenario': ''
                 }
                 config, st.session_state.thread_id = create_config('Run Agent', True)
             else:  # continuation
