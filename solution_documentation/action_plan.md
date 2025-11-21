@@ -1,122 +1,350 @@
 
-#1 Create glossaries and db schema file.
-
-def fill_database_schema(database_schema, warehouse_id):
-    """
-    Fill column_values and date_range fields in database_schema using optimized batch queries.
-
-    This function executes all queries from query_to_get_column_values and query_to_get_date_range
-    using UNION ALL to minimize database round trips.
-
-    Args:
-        database_schema: List of table dictionaries with columns (will be modified in-place)
-        warehouse_id: Databricks SQL warehouse ID
-
-    Returns:
-        database_schema: The modified database_schema with filled column_values and date_range
-    """
-    # Collect all queries with metadata about their location
-    column_value_queries = []
-    date_range_queries = []
-
-    for table_idx, table in enumerate(database_schema):
-        table_name = table['table_name']
-        for column_name, column_info in table['columns'].items():
-            # Collect column value queries
-            query = column_info.get('query_to_get_column_values', '').strip()
-            if query:
-                column_value_queries.append({
-                    'table_idx': table_idx,
-                    'column_name': column_name,
-                    'query': query,
-                    'identifier': f"{table_name}.{column_name}"
-                })
-
-            # Collect date range queries
-            date_query = column_info.get('query_to_get_date_range', '').strip()
-            if date_query:
-                date_range_queries.append({
-                    'table_idx': table_idx,
-                    'column_name': column_name,
-                    'query': date_query,
-                    'identifier': f"{table_name}.{column_name}"
-                })
-
-    # Execute column value queries with UNION ALL
-    if column_value_queries:
-        logging.info(f"Executing {len(column_value_queries)} column value queries in a single batch...")
-        union_parts = []
-        for item in column_value_queries:
-            # Wrap each query to add an identifier column
-            union_parts.append(f"SELECT '{item['identifier']}' AS _identifier, CAST(value AS STRING) AS value FROM ({item['query']}) AS subq(value)")
-
-        batch_query = " UNION ALL ".join(union_parts)
-        result = execute_query(batch_query, warehouse_id)
-
-        if result['success']:
-            df = result['data']
-
-            # Use pandas groupby for performance (faster than loops)
-            if df is not None and not df.empty:
-                grouped = df.groupby('_identifier')['value'].apply(
-                    lambda x: ' | '.join(x.dropna().astype(str))
-                ).to_dict()
-
-                # Fill the database_schema with results
-                for item in column_value_queries:
-                    identifier = item['identifier']
-                    if identifier in grouped:
-                        database_schema[item['table_idx']]['columns'][item['column_name']]['column_values'] = grouped[identifier]
-        else:
-            logging.error(f"Column value queries failed: {result['error']}")
-
-    # Execute date range queries with UNION ALL
-    if date_range_queries:
-        logging.info(f"Executing {len(date_range_queries)} date range queries in a single batch...")
-        union_parts = []
-        for item in date_range_queries:
-            # Wrap each query to add an identifier column
-            union_parts.append(f"SELECT '{item['identifier']}' AS _identifier, CAST(value AS STRING) AS value FROM ({item['query']}) AS subq(value)")
-
-        batch_query = " UNION ALL ".join(union_parts)
-        result = execute_query(batch_query, warehouse_id)
-
-        if result['success']:
-            df = result['data']
-
-            # Use pandas set_index for performance (O(1) lookup vs O(n) loops)
-            if df is not None and not df.empty:
-                date_mapping = df.set_index('_identifier')['value'].to_dict()
-
-                # Fill the database_schema with results
-                for item in date_range_queries:
-                    identifier = item['identifier']
-                    if identifier in date_mapping and date_mapping[identifier] is not None:
-                        database_schema[item['table_idx']]['columns'][item['column_name']]['date_range'] = str(date_mapping[identifier])
-        else:
-            logging.error(f"Date range queries failed: {result['error']}")
-
-    logging.info("Database schema filling completed!")
-    return database_schema
-
-#2 Prep & cleanup
+#1 Prep & cleanup
 These are tasks making the agent simpler & more organized for this future task: Implement consistency of terms usage
 
-in function create_query_analysis, the prompt asks for explanation and insight, also the class. remove the explanation, leave insight. rename it to create_query_insight.
+1) in function create_query_analysis, the prompt asks for explanation and insight, also the class. remove the explanation, leave insight. rename it to create_query_insight.
 
-move scenario from generate_answer_details into the state. 
+2) move scenario from generate_answer_details into the state.
 
-Move Key Assumption into generate_answer details:
-- remove explanation from sql query, add it to Key Assumptions which will be part of generate_answer_details.
-- rename function format_sql_query_explanations_for_prompt to add_key_assumptions.
+Implementation details:
+- Add 'scenario: str' field to State TypedDict in agent.py
+- Update all write locations where scenario is assigned:
+  * extract_analytical_intent function (output['scenario'])
+  * orchestrator function (scenario variable assignment)
+- Update all read locations where scenario is accessed:
+  * generate_answer function (state['generate_answer_details']['scenario'] → state['scenario'])
+  * create_final_message nested function in generate_answer
+  * databricks_util.py in log_to_mlflow function (for MLflow logging)
+- Change from: state['generate_answer_details']['scenario']
+  To: state['scenario'] 
 
-Reduce the number of LLMCalls at this step: 
-make prompt_ambiguous and prompt_notes a single LLMCall that outputs the notes: prompt_ambiguous_question_followups.
+3) Move Key Assumptions into generate_answer_details:
 
-Need still to decide on this:
-"Notes" are followup questions. we can rename notes to "agent_questions". Its being used in generating the final answer.
+Current Implementation:
+- 'explanation' key exists in each item of state['current_sql_queries']
+- Function format_sql_query_explanations_for_prompt() extracts all 'explanation'
+  values from state['current_sql_queries'] and formats them as "Key Assumptions"
+- Key Assumptions are only added to the final answer in Scenario A
 
-#3 Implement consistency of terms usage.
+New Implementation:
+- Remove 'explanation' key from state['current_sql_queries'] entirely
+- Add new key 'key_assumptions' (list of strings) to state['generate_answer_details']
+- Initialize: state['generate_answer_details']['key_assumptions'] = []
+- The function create_query_explanation runs once per SQL query (after execution)
+  and appends each query's explanation to generate_answer_details['key_assumptions']
+- Rename format_sql_query_explanations_for_prompt to format_key_assumptions_for_prompt
+- New format_key_assumptions_for_prompt() reads from
+  generate_answer_details['key_assumptions'] (list) and joins/formats them
+  for the final answer (Scenario A only)
+
+Example:
+# After Query 1 executes
+state['generate_answer_details']['key_assumptions'] = ["Query 1: Filtered to Q1 2024"]
+
+# After Query 2 executes
+state['generate_answer_details']['key_assumptions'].append("Query 2: Excluded inactive accounts")
+
+# In generate_answer (Scenario A only)
+# After LLM generates the answer:
+if state['scenario'] == 'A':
+    formatted_key_assumptions = format_key_assumptions_for_prompt(
+        state['generate_answer_details']['key_assumptions']
+    )
+    # Append Key Assumptions to the LLM's response
+    final_answer = f"{llm_response}\n\n{formatted_key_assumptions}"
+
+4) Reduce the number of LLMCalls at this step:
+make prompt_ambiguous and prompt_notes a single LLMCall that outputs a structured output with 2 fields:
+
+class AmbiguityAnalysis(TypedDict):
+  ambiguity_explanation: str # brief explanation of what make it ambiguous
+  agent_questions: list[str] # 2-3 alternative analytical intents as questions
+
+Implementation details:
+- Create new AmbiguityAnalysis TypedDict class after AnalyticalIntents class definition
+- In extract_analytical_intent function:
+  * Replace chain_3 to use: llm.with_structured_output(AmbiguityAnalysis)
+  * Remove chain_4 (prompt_notes) entirely
+  * Update the "Analytical Intent Ambiguous" branch to:
+    - Invoke chain_3 once (not chain_3 then chain_4)
+    - Store result_3['ambiguity_explanation'] in state['generate_answer_details']['ambiguity_explanation']
+    - Store result_3['agent_questions'] in state['generate_answer_details']['agent_questions']
+    - Update output dict to use result_3['agent_questions'] for analytical_intent
+    - Update output dict to use result_3['ambiguity_explanation'] for notes (will be renamed in Point 5)
+
+The sys prompt should be like that:
+"""
+The latest user question is ambiguous based on the following database schema: 
+{objects_documentation}.
+
+Here is the conversation history with the user:
+"{messages_log}".
+
+Latest user message:
+"{question}".      
+
+Step 1: Identify what makes the question ambiguous. The question is ambiguous if: 
+
+- Different source columns would give substantially different insights:
+  Example: pre-aggregated vs computed metrics with different business logic.
+
+- Multiple fundamentally different metrics could answer the same question:
+  Example: "What is the top client?" is ambiguous in a database schema that contains multiple metrics that can answer the question (highest value of sales / highest number of sales). 
+
+- Different columns with the same underlying source data (check database schema) do NOT create ambiguity.
+
+Step 2: Create maximum 3 alternatives of analytical intents to choose from.
+    - Do not include redundant intents, be focused.  
+    - Each analytical intent is for creating one single sql query.
+    - Write each analytical intent using 1 sentence.
+    - Mention specific column names, tables names, aggregation functions and filters from the database schema.  
+    - Mention only the useful info for creating sql queries.    
+	  
+Step 3: Create a brief explanation in this format:
+  1. One sentence explaining the ambiguity
+  2. Present the 2-3 alternatives as clear options for the user to choose from
+  
+Use simple, non-technical language. Be concise.
+  """
+
+5) Rename generate_answer_details['notes'] into generate_answer_details['agent_questions'].
+Adjust the codebase.
+
+Implementation details:
+- Find all occurrences of 'notes' variable and rename to 'agent_questions':
+  * In extract_analytical_intent: output dict 'notes' key → 'agent_questions' key
+  * In orchestrator: 'notes' variable → 'agent_questions' variable
+  * state['generate_answer_details']['notes'] → state['generate_answer_details']['agent_questions']
+- Update scenario prompt Invoke_Params:
+  * Scenario C: Remove 'notes' parameter entirely (was showing unavailable data message - no longer needed)
+  * Scenario D: Change 'notes' parameter to 'ambiguity_explanation' parameter
+- Update scenario prompt templates:
+  * Scenario C: Remove {notes} from prompt text
+  * Scenario D: Change {notes} to {ambiguity_explanation} in prompt text
+- Note: 'agent_questions' in scenarios A/B/C will be populated by Point 6's new function
+- Note: 'agent_questions' in scenario D is already populated by Point 4's AmbiguityAnalysis
+
+6) Create a "generate_agent_questions" function that will generate 2 next steps that will guide the user.
+
+Implementation details:
+- Create new TypedDict class before the function:
+  ```python
+  class AgentQuestions(TypedDict):
+    agent_questions: Annotated[list[str], "max 2 smart next steps for the user to explore further"]
+  ```
+- Create new function generate_agent_questions(state: State) -> list[str]
+- Place function definition before generate_answer function (around line 790)
+- The function should:
+  * Use llm.with_structured_output(AgentQuestions)
+  * Return result['agent_questions'] (a list of strings)
+- Call this function in generate_answer tool:
+  * After: scenario = state['scenario']
+  * Before: sys_prompt = next(s['Prompt'] for s in scenario_prompts...)
+  * Add: if scenario in ['A', 'B', 'C']:
+           state['generate_answer_details']['agent_questions'] = generate_agent_questions(state)
+- This function will populate generate_answer_details['agent_questions'].
+- This function will run only if the scenario is A,B or C and the prompt will include these instructions:
+
+"You are a decision support consultant helping users become more data-driven.
+    
+Here is the conversation history with the user:
+{messages_log}.
+
+Latest user message:
+{question}.  
+
+Your task is to guide the users to answer their analytical goal that you derive from the conversation history and from the last user message.
+
+Suggest max 2 smart next steps for the user to explore further, chosen from the examples below and tailored to what's available in the database schema:
+  {objects_documentation}
+
+  Example of next steps:
+  - Trends over time:
+    Example: "Want to see how this changed over time?".
+    Suggest trends over time only for tables containing multiple dates available. 
+
+  - Drill-down suggestions:
+    Example: "Would you like to explore this by brand or price tier?"
+
+  - Top contributors to a trend:
+    Example: "Want to see the top 5 products that drove this increase in satisfaction?"
+
+  - Explore a possible cause:
+    Example: "Curious if pricing could explain the drop? I can help with that."
+
+  - Explore the data at higher granularity levels if the user analyzes on low granularity columns. Use database schema to identify such columns.
+    Example: Instead of analyzing at product level, suggest at company level.
+
+  - Explore the data on filtered time ranges. Check the database schema for date range information under "Important considerations about dates available".
+    Example: Instead of analyzing for all feedback dates, suggest filtering for a year or for a few months.
+
+  - Filter the data on the value of a specific attribute. Use values from the database schema.
+    Example: Instead of analyzing for all companies, suggest filtering for a single company and give a few suggestions.
+    "
+
+6.2 response_guidelines will be deleted.
+scenario_A, scenario_B, scenario_C and scenario_D will not embedd response_guidelines anymore
+
+Implementation details:
+- Find the response_guidelines variable definition (around line 640)
+- Delete the entire response_guidelines variable and its multi-line string content
+- Remove all instances of: + '\n\n' + response_guidelines.strip()
+  * From scenario_A Prompt
+  * From scenario_B Prompt
+  * From scenario_C Prompt
+  * From scenario_D Prompt
+
+6.3 Change scenario_A/B/C/D:
+
+Implementation details for ALL scenarios:
+- Update each scenario dict's 'Invoke_Params' lambda to include:
+  * 'agent_questions': state['generate_answer_details'].get('agent_questions', [])
+- Scenario A also needs to keep: 'insights', 'objects_documentation', 'messages_log', 'question'
+- Scenario B/C need: 'objects_documentation', 'messages_log', 'question', 'agent_questions'
+- Scenario D needs: 'objects_documentation', 'messages_log', 'question', 'ambiguity_explanation', 'agent_questions'
+- All prompts should reference {agent_questions} in the template
+
+-->> scenario_A:
+"You are a decision support consultant helping users become more data-driven.
+Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
+    
+Here is the conversation history with the user:
+{messages_log}.
+Latest user message:
+{question}.  
+- Use both the raw SQL results and the extracted insights below to form your answer: {insights}. 
+- Don't assume facts that are not backed up by the data in the insights.    
+- Include all details from these insights.
+- Suggest these next steps for the user: {agent_questions}.
+	
+Response guidelines:
+  - Respond in clear, non-technical language. 
+  - Be concise.
+  - Keep it simple and conversational.
+  - If the question is smart, reinforce the user's question to build confidence. 
+    Example: "Great instinct to ask that - it's how data-savvy pros think!"
+  - Ask the user which option they prefer from your suggested next steps.
+  - Use warm, supportive closing that makes the user feel good. 
+    Example: "Keep up the great work!", "Have a great day ahead!"
+
+-->> scenario_B:
+
+"You are a decision support consultant helping users become more data-driven.
+Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
+    
+Here is the conversation history with the user:
+{messages_log}.
+
+Latest user message:
+{question}.
+
+- Suggest these next steps for the user: {agent_questions}
+
+Response guidelines:
+  - Respond in clear, non-technical language. 
+  - Be concise.
+  - Keep it simple and conversational.
+  - Ask the user which option they prefer from your suggested next steps."
+
+-->> scenario_C:
+
+"You are a decision support consultant helping users become more data-driven.
+Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
+
+Here is the conversation history with the user:
+{messages_log}.
+
+Latest user message:
+{question}.
+
+Unfortunately, the requested information from last prompt is not available in our database. 
+
+- Suggest these next steps for the user: {agent_questions}.
+
+Response guidelines:
+  - Respond in clear, non-technical language. 
+  - Be concise.
+  - Keep it simple and conversational.
+  - Ask the user which option they prefer from your suggested next steps."
+
+-->> scenario_D:
+
+"You are a decision support consultant helping users become more data-driven.
+Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
+
+Here is the conversation history with the user:
+{messages_log}.
+
+Latest user message:
+{question}.
+
+The last user prompt could be interpreted in multiple ways. 
+Here's what makes it ambiguous: {ambiguity_explanation}.
+Suggest these next steps for the user: {agent_questions}.
+
+Response guidelines:
+- User to specify which analysis it wants
+- Respond in clear, non-technical language. 
+- Be concise.
+- Keep it simple and conversational."
+
+-->> the orchestrator function runs sys_prompt_notes under the "# if scenario C" branch. we will remove this LLMCall, this entire else: block.
+
+Implementation details:
+- In orchestrator function, find the "if scenario C" branch (around line 935)
+- The current structure is:
+  ```python
+  if result['next_step'] == 'Continue':
+      scenario = None
+      notes = None
+  elif result['next_step'] == 'B':
+      scenario = result['next_step']
+      notes = None
+  else:  # This is scenario C
+      # Contains sys_prompt_notes, chain creation, and LLM invocation
+      scenario = result['next_step']
+      notes = notes_text.content
+  ```
+- Replace the entire else: block with:
+  ```python
+  else:  # scenario C
+      scenario = result['next_step']
+      agent_questions = None  # Changed from 'notes' per Point 5
+      next_tool_name = 'generate_answer'
+  ```
+- This removes approximately 20 lines of code that created and ran sys_prompt_notes
+
+7) Adapt UI
+In the app.py, the streamlit app has a purple gradient background. remove that and simply use a white background with black text for user questions and agent answers.
+
+Implementation details:
+Find and update these CSS selectors in the st.markdown("""<style>...</style>""") block:
+
+1. .stApp background (around line 68):
+   Change: background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
+   To: background: #ffffff !important;
+
+2. .main .block-container background (around line 96):
+   Change: background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
+   To: background: #ffffff !important;
+
+3. .main-header background (around line 101):
+   Change: background: inherit !important;
+   To: background: #ffffff !important;
+   Also change border: border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+   To: border-bottom: 1px solid #e5e7eb;
+
+4. .user-message and .ai-message background (around lines 154-160):
+   Change both: background: inherit !important;
+   To both: background: #ffffff !important;
+
+5. .message-text color (around line 192):
+   Change: color: #ffffff;
+   To: color: #000000;
+   Also change: background: inherit !important;
+   To: background: #ffffff !important; 
+
+#2 Implement consistency of terms usage.
 
 With the solution implemented in task #1, implement these flows:
 
@@ -184,23 +412,7 @@ New scenario: A2: queries for synonym / single related item.
 Current scenario D becomes D1.
 New scenario: scenario D2: in extract_analytical_intent, before running the LLMCall that decides whether the question is clear or ambiguous (prompt_clear_or_ambiguous), check if the term asked by the user is not available in db and if related terms are more than 1 (make a function for it). if yes, don't run prompt_clear_or_ambiguous , set scenario D2 and set Notes = "The term is not available in db, here are the options: <parsed from terms>".
 
-#4 Lack of temporary context.
-Problem: Although there is a date_range column, it's not used in creating the analytical intent, rather in the function get_date_ranges_for_tables which shows the date ranges from the tables in the query (Key Assumptions).
-
-Solution: in sys_prompt_clear, at "Important considerations about time based analysis:", use the variable date_range.
-change this prompt "Derive actual date ranges from the feedback date ranges described in database_content."
-Or simply because you added the date_range in db schema, just leave it there and just adjust this prompt to make it aware of "Important considerations about dates available"
-
-#5 Enhance follow-up questions
-Problem: Recommended trend over time analysis when tables did not allow this.
-
-Solution: inject date_range info into the prompt input and promp engineering. Still need to decide if I take that part out of response_guidelines and I create a separate LLMCall or not.
-What I like is that I already added in the prompt types of analysis the agent can do, and that are useful for any dataset. I can think of maybe enhancing that prompt with flags saying what's possible and what not for each analysis type, but need to think more about it. First thoughts is that in the long run I need a separate LLMCall for followup questions, because I can inject insights from previous queries (long memory) and the agent can make correlations with other info to suggest smart next moves the user did not think of. So I would do a separate LLMCall to fill out agent_questions. and the generate_answer prompt will have the response_guidelines that now are more generic, and a simpler prompt now that it doesnt have to suggest anything.
-
-#6 Adapt UI
-Implement the green ugly colours for the background to match the PowerBI apps. The agent will be embedded in the left navigation bar of PBi apps (Nikki suggestion). 
-
-#7 The UI shows some numbers in a weird way.
+#3 The UI shows some numbers in a weird way.
 Need to investigate why. Maybe we move out from streamlit idk.
 
 

@@ -65,7 +65,7 @@ st.markdown("""
 /* Global app styling */
 .stApp {
     font-family: 'Maven Pro', -apple-system, BlinkMacSystemFont, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
+    background: #ffffff !important;
 }
 
 /* Hide default streamlit elements */
@@ -93,13 +93,13 @@ header {visibility: hidden;}
 .main .block-container {
     padding: 0 !important;
     max-width: 100% !important;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
+    background: #ffffff !important;
 }
 
 /* Header section */
 .main-header {
-    background: inherit !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    background: #ffffff !important;
+    border-bottom: 1px solid #e5e7eb;
     padding: 24px;
     margin: 0;
 }
@@ -151,12 +151,12 @@ header {visibility: hidden;}
 
 /* Chat message styling */
 .user-message {
-    background: inherit !important;
+    background: #ffffff !important;
     padding: 24px 0;
     margin: 0;
 }
 .ai-message {
-    background: inherit !important;
+    background: #ffffff !important;
     padding: 24px 0;
     margin: 0;
 }
@@ -189,8 +189,8 @@ header {visibility: hidden;}
     flex: 1;
     line-height: 1.6;
     font-size: 16px;
-    color: #ffffff;
-    background: inherit !important;
+    color: #000000;
+    background: #ffffff !important;
 }
 
 /* No chat input CSS - let Streamlit handle everything */

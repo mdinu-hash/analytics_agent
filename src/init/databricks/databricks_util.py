@@ -671,7 +671,7 @@ def log_agent_metrics_mlflow(result:Dict) -> None:
     mlflow.set_tracking_uri("databricks")
 
     # Scenario
-    scenario = result.get('generate_answer_details',{}).get('scenario','Unknown')
+    scenario = result.get('scenario','Unknown')
     mlflow.log_param("scenario",scenario)
 
     # Analytical intents
