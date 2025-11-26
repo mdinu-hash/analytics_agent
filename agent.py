@@ -186,13 +186,16 @@ Important considerations about creating analytical intents:
 
   Use simple, non-technical language. Be concise.
   """  
-
+  
+  # decide if question is clear or ambiguous
   prompt_clear_or_ambiguous = create_prompt_template('system', sys_prompt_clear_or_ambiguous)
   chain_1= prompt_clear_or_ambiguous | llm.with_structured_output(ClearOrAmbiguous)  
 
+  # if question is clear, create analytical intent
   prompt_clear = create_prompt_template('system', sys_prompt_clear)
   chain_2= prompt_clear | llm.with_structured_output(AnalyticalIntents)
 
+  # if question is ambiguous, explain why and create follow-up questions.
   prompt_ambiguous = create_prompt_template('system', sys_prompt_ambiguous)
   chain_3= prompt_ambiguous | llm.with_structured_output(AmbiguityAnalysis)
 
@@ -215,7 +218,8 @@ Important considerations about creating analytical intents:
         output = {
             'scenario': 'A',
             'analytical_intent': result_2['analytical_intent'],
-            'agent_questions': None
+            'ambiguity_explanation': '',
+            'agent_questions': []
         }
   elif result_1['analytical_intent_clearness'] == "Analytical Intent Ambiguous":
          # create ambiguity analysis (combines both analytical intents and explanation)
@@ -225,16 +229,14 @@ Important considerations about creating analytical intents:
          output = {
             'scenario': 'D',
             'analytical_intent': result_3['agent_questions'],
+            'ambiguity_explanation': result_3['ambiguity_explanation'],
             'agent_questions': result_3['agent_questions'] }
-
-         # store in generate_answer_details
-         state['generate_answer_details']['ambiguity_explanation'] = result_3['ambiguity_explanation']
-         state['generate_answer_details']['agent_questions'] = result_3['agent_questions']
 
   # update the state
   state['scenario'] = output['scenario']
-  state['generate_answer_details']['agent_questions'] = output['agent_questions']
   state['analytical_intent'] = output['analytical_intent']
+  state['generate_answer_details']['ambiguity_explanation'] = output['ambiguity_explanation']
+  state['generate_answer_details']['agent_questions'] = output['agent_questions']
   
   # control flow
   action = AgentAction(tool='extract_analytical_intent', tool_input='',log='tool ran successfully')

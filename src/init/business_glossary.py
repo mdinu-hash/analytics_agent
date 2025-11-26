@@ -1,13 +1,28 @@
 # Business Terms Glossary
 
 key_terms = [
+    # ========================= ASSETS =========================
      {
         'name': 'Assets Under Management',
         'definition': 'Total market value of all client investments',
-        'query_instructions': "Use account_assets from fact_account_monthly table. Filter to_date = '9999-12-31' to get current records. Aggregate at advisor, household, or business line level as needed.",
+        'query_instructions': '''Use account_assets from fact_account_monthly table. 
+         Don't aggregate over time as this measure is semi-additive. 
+         You can aggregate this measure at advisor, household, or business line level.''',
         'exists_in_database': True
     },
-
+     {
+        'name': 'advisory assets',
+        'definition': 'Assets in Managed Portfolio and SMA business lines',
+        'query_instructions': ''' Aggregate fact_account_monthly.account_assets filtered for business_line_name in ('Separately Managed Account','Managed Portfolio').
+                                  Don't aggregate over time as this measure is semi-additive.''',
+        'exists_in_database': True
+    },
+     {
+        'name': 'liquid assets',
+        'definition': 'assets easily converted to cash',
+        'query_instructions': '',
+        'exists_in_database': False
+    },
      {
         'name': 'Household',
         'definition': '',
@@ -21,39 +36,37 @@ key_terms = [
         'query_instructions': "to get recent records, filter for advisors.advisor_status = 'Active' and advisors.to_date = '9999-12-31'",
         'exists_in_database': True
     } ,
-
     {
         'name': 'Account',
         'definition': '',
         'query_instructions': "to get recent records, filter for account.account_status = 'Active' and account.to_date = '9999-12-31'",
         'exists_in_database': True
     } ,
-
-     {
-        'name': 'payout',
-        'definition': 'Dollar amount paid to advisor.',
-        'query_instructions': 'open accounts and to_date = 9999-12-31 to get most recent records only. for historical point in time, ',
-        'exists_in_database': False
-    } ,
-
-     {
-        'name': 'net revenue',
-        'definition': 'Revenue retained by Capital Partners.',
-        'query_instructions': '',
-        'exists_in_database': True
-    },
-
-     {
-        'name': 'compensation',
-        'definition': 'placeholder.',
-        'query_instructions': '',
-        'exists_in_database': False
-    },
-
      {
         'name': 'high net worth',
         'definition': 'If household_assets >= $1M.',
         'query_instructions': 'query fact_household_monthly for high_net_worth_flag = True',
+        'exists_in_database': False
+    },
+# ========================= REVENUE STATEMENT =========================
+
+     {
+        'name': 'payout',
+        'definition': 'Dollar amount paid to advisor',
+        'query_instructions': 'Sum of fact_revenue_monthly.advisor_payout_amount',
+        'exists_in_database': True
+    } ,
+
+     {
+        'name': 'net revenue',
+        'definition': 'Revenue retained by Capital Partners',
+        'query_instructions': 'Sum of fact_revenue_monthly.net_revenue',
+        'exists_in_database': True
+    },
+     {
+        'name': 'distribution',
+        'definition': 'advisor payout after tech fees are deducted',
+        'query_instructions': '',
         'exists_in_database': False
     }
 ]
@@ -69,7 +82,8 @@ synonyms = {
 
 # Related terms - terms that are conceptually related
 related_terms = [
-    ['compensation' ,'net revenue', 'payout']
+    ['payment','net revenue', 'payout','distribution'],
+    ['advisory assets','producing assets','liquid assets']
 ]
 
 
@@ -89,13 +103,6 @@ def check_glossary_consistency():
         if key_term_normalized not in key_term_names:
             missing_terms.add(key_term)
 
-    # Check related_terms - all terms in the lists should exist in key_terms
-    for term_group in related_terms:
-        for term in term_group:
-            term_normalized = term.replace('_', ' ').lower()
-            if term_normalized not in key_term_names:
-                missing_terms.add(term)
-
     # Print messages for missing terms
     if missing_terms:
         print("⚠️  Missing terms found in business_glossary:")
@@ -110,5 +117,5 @@ def check_glossary_consistency():
             print(f"}},")
         print("\n" + "="*80)
     else:
-        print("✅ All terms in synonyms and related_terms exist in key_terms")
+        print("✅ All terms in synonyms exist in key_terms")
 

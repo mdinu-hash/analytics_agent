@@ -5,16 +5,16 @@
 ### Orchestrator
 
 - If orchestrator runs first time, checks if scenario B or C, otherwise Continue.
-  - if Continue: 
+  - if Continue:
      - set next_tool_name = get_next_tool(state).
+     - set scenario = '' (empty string, NOT None - critical for type validation).
   - if scenario B , set next_tool_name = 'generate_answer'.
   - if scenario C:
-           -  LLMCall: "Write a sentence suggesting an analysis with the existing schema.". Place it in notes.
-		   -  set next_tool_name: generate_answer.
-		   -  set Scenario = C.
-- If orchestrator run once: 
+           -  set next_tool_name: generate_answer.
+		   -  set scenario = 'C'.
+- If orchestrator run once:
    - set next_tool = get_next_tool(state).
-   - if next_tool = 'generate_answer', set scenario = A and set notes = None.
+   - if next_tool = 'generate_answer', set scenario = 'A'.
 
 ### extract_analytical_intent
 
@@ -22,45 +22,54 @@
   - If Output 1: Analytical Intent Extracted
       - LLMCall prompt_clear ("Refine technically the user ask")
 	  - set analytical_intent = result of LLMCall.
-	  - set Scenario = A
-	  - set Notes = None.
+	  - set scenario = 'A'.
+	  - set agent_questions = None.
 	  - set tool_name = create_sql_query_or_queries.
   - If Output 2: Analytical Intent Ambiguous
-    - LLMCall prompt_ambiguous ("identifying what makes the question ambiguous & provide max 3 alternatives to choose from.)
-	- set analytical_intent = result of LLMCall.
-	- LLMCall prompt_notes ("here are different intents: xxx. Explain what makes the question ambiguous and mention the alternatives.")
-	- set Notes = result of LLMCall.
-	- set tool_name = generate_answer
-	- set Scenario = D.
+    - Single LLMCall prompt_ambiguous with structured output (AmbiguityAnalysis):
+      - Identifies what makes the question ambiguous.
+      - Creates max 3 alternatives of analytical intents.
+      - Creates brief explanation.
+    - set analytical_intent = result['agent_questions'].
+    - set generate_answer_details['ambiguity_explanation'] = result['ambiguity_explanation'].
+    - set generate_answer_details['agent_questions'] = result['agent_questions'].
+    - set scenario = 'D'.
+	- set tool_name = generate_answer.
 
 
 ### create_sql_query_or_queries
 
-- LLMCall: "create sql query basedon on intents, db schema, db content".
+- LLMCall: "create sql query based on intents, db schema, db content".
 - set current_sql_queries[query] =  result of LLMCall.
-- set current_sql_queries[explanation,result,insight]= ''.
+- set current_sql_queries[result,insight]= ''.
 - execute_sql_query: for every sql query:
   - executes it:
         - if execution is without errors, set sql_query_result = result of execution.
 		- if execution has errors, 3 attempts to:
-		     - correct_syntax_sql_query: LLMCall ("Correct the following sql query which returns an error caused by wrong syntax.")			   
+		     - correct_syntax_sql_query: LLMCall ("Correct the following sql query which returns an error caused by wrong syntax.")
 			 - execute new sql.
-			 - set sql_query_result 
+			 - set sql_query_result
 		- checks if sql_query_result exceeds 500 tokens.
 		  - if does not exceed:
-		       - set analysis = create_query_analysis(sql_query, sql_query_result)
-			   - set ['current_sql_queries']['insight'] = analysis
-			   - set ['current_sql_queries']['explanation'] = create_query_explanation(sql_query) which runs LLMCall ("highlight parts of this query")
-			   - set ['current_sql_queries']['query']
-			   - set ['current_sql_queries']['result']
-		  - if exceeds,3 iterations to:
+		       - set insight = create_query_insight(sql_query, sql_query_result) which runs LLMCall ("Provide an insight based on the query results")
+			   - set current_sql_queries['insight'] = insight
+			   - set current_sql_queries['query'] = sql_query
+			   - set current_sql_queries['result'] = sql_query_result
+			   - set explanation = create_query_explanation(sql_query) which runs LLMCall ("highlight parts of this query")
+			   - append explanation to generate_answer_details['key_assumptions']
+		  - if exceeds, 3 iterations to:
 		          - calls to refine_sql_query() which runs an LLMCall ("optimize a sql query that returns > 20 rows or exceeds the token limit.")
 
 ### generate_answer
 
-- retrieves scenario.
+- retrieves scenario from state['scenario'].
+- if scenario in ['A', 'B', 'C']:
+  - runs generate_agent_questions() LLMCall to suggest max 2 smart next steps.
+  - set generate_answer_details['agent_questions'] = result.
 - based on scenario, retrieves prompt.
-- runs the LLMCall (if scenario is A, attaches to the prompt the Key Assumptions)
+- runs the LLMCall.
+- if scenario is A, appends Key Assumptions to the LLM response.
+  - Key Assumptions are formatted from generate_answer_details['key_assumptions'].
 - set llm_answer to the result of LLMCall.
 - manage_memory_chat_history.
 
@@ -76,11 +85,10 @@ Scenario C: user asks for data/metrics not available in the database schema.
 Orchestrator -> decides its scenario C -> generate_answer
 
 Scenario D: analytical intent ambiguous -> needs followup.
-Orchestrator 
--> extract_analytical_intent 
--> Checks if intent is clear or ambiguous, decides it's ambigous 
--> set analytical_intent = LLMCall "provide max 3 alternatives" 
--> set Notes = LLMCall "Explain what makes the question ambiguous and mention the alternatives." 
+Orchestrator
+-> extract_analytical_intent
+-> Checks if intent is clear or ambiguous, decides it's ambiguous
+-> Single LLMCall returns both: agent_questions (3 alternatives) and ambiguity_explanation
 -> generate_answer
 
 ## Key Variables
@@ -89,11 +97,26 @@ Orchestrator
 Contains table and column definitions, relationships, query instructions for key terms, date range assumptions.
 Used to inject context for the LLM to create accurate sql queries. In: extract_analytical_intent ....
 
-### Notes:
-Scenario A: blank.
-Scenario B: blank.
-Scenario C: Write a sentence suggesting an analysis with the existing schema.
-Scenario D: brief explanation of what makes the question ambiguous and mention alternatives.
+### scenario (state-level variable):
+Scenario A: 'A' - intent clear -> sql generation and execution.
+Scenario B: 'B' - pleasantries or question already answered.
+Scenario C: 'C' - user asks for data/metrics not available.
+Scenario D: 'D' - analytical intent ambiguous.
+Initial/Continue: '' (empty string) - not yet determined.
+
+### agent_questions (in generate_answer_details):
+Scenario A: List of 2 smart next steps generated by generate_agent_questions().
+Scenario B: List of 2 smart next steps generated by generate_agent_questions().
+Scenario C: List of 2 smart next steps generated by generate_agent_questions().
+Scenario D: List of 2-3 alternative analytical intents from AmbiguityAnalysis LLMCall.
+
+### ambiguity_explanation (in generate_answer_details):
+Scenario D only: Brief explanation of what makes the question ambiguous.
+Other scenarios: Not populated.
+
+### key_assumptions (in generate_answer_details):
+List of strings. Each SQL query execution appends its explanation to this list.
+Used only in Scenario A - formatted and appended after LLM response.
 
 ## functions
 
@@ -136,6 +159,7 @@ Populate this field for date fields that are refreshed at least monthly.
 - use active, direct language like "to get recent records, filter for account.account_status = 'Active'"
 - whenever you mention a column, specify in this format: table_name.column_name
 - add here filters and transformations for querying certain terms.
+- if the term is not defined at org level but is used in real life, we call it vague: add it here with definition being empty.
 
 #### Synonyms:
 - Add the synonym to the left and the key term (defined) in the right

@@ -1,5 +1,5 @@
 
-#1 Prep & cleanup
+Task #1 Prep & cleanup
 These are tasks making the agent simpler & more organized for this future task: Implement consistency of terms usage
 
 1) in function create_query_analysis, the prompt asks for explanation and insight, also the class. remove the explanation, leave insight. rename it to create_query_insight.
@@ -405,9 +405,9 @@ Find and update these CSS selectors in the st.markdown("""<style>...</style>""")
    Also change: background: inherit !important;
    To: background: #ffffff !important; 
 
-#2 Implement consistency of terms usage.
+Task #2 Implement consistency of terms usage.
 
-With the solution implemented in task #1, implement these flows:
+Implement these flows:
 
 A. Agent pulls the term from Key Terms and queries the database.
 B. Agent pulls the synonym of the term and uses the synonym to query the database.
@@ -415,65 +415,100 @@ C. Agent pulls out related terms that are available in db to suggest them. If th
 D. Agent pulls out related terms that are available in db to suggest them. If they are > 1: follow-up asking which of them?
 E. User asks for terms that have all related terms not available in db, or for metrics not available -> Scenario C.
 
-- Create helper functions for term searching and analysis
+1) Create helper function for term searching and analysis
 
-**Add search_terms() function** (from dev notebook cell-4):
+**Implementation**: Function already created in `notebooks/dev.ipynb` cell-4. Copy to appropriate module.
+
 ```python
 def search_terms(user_question, key_terms, synonyms, related_terms):
     """
     Searches for key terms, synonyms, and related terms in a user question.
     Uses keyword lookup and fuzzy matching.
 
-    Returns:
-        dict with 'key_terms_found', 'synonyms_found', 'related_terms_found',
-        'synonym_searched_for', 'term_searched_for_related'
+    Returns dict with:
+        - key_terms: list of dicts - key_terms that exist in database (exists_in_database=True)
+        - synonym_searched_for: str or None - the word/phrase from user question that matched a synonym
+        - synonym: dict or None - the key term that the synonym maps to
+        - synonym_exists_in_db: bool - True if synonym exists in database
+        - synonym_docu: str or None - format: "{synonym_word} is synonym with {key_term_name}"
+        - related_term_searched_for: str or None - the word/phrase from user question that has related terms
+        - related_term_exists_in_db: bool - True if exactly 1 related term exists in DB
+        - related_terms: dict or list or None - single dict if 1 related term, list of dicts if >1
+        - related_terms_exists_in_db: bool - True if >1 related terms exist in DB
+        - related_terms_docu: str or None - format: "{term_from_q} is related (similar but different) with: {rel1}, {rel2}"
+          (multi-line if multiple terms from question have related terms)
     """
 ```
 
 This function:
 - Uses keyword lookup (exact substring match) and fuzzy matching (difflib.get_close_matches with 0.85 cutoff)
 - For multi-word terms, uses n-gram approach to match complete phrases
-- Tracks which synonym was found in the query (synonym_searched_for)
-- Tracks which term triggered related terms (term_searched_for_related)
-- Excludes terms already found in key_terms_found or synonyms_found from related_terms_found
 
-**Add terms_helper_function()** (from dev notebook cell-5):
-```python
-def terms_helper_function(search_terms_output):
-    """
-    Analyzes search_terms output to determine if database alternatives exist for terms not in DB.
+2) Enhance objects_documentation
 
-    Returns:
-        dict with boolean flags and formatted string messages:
-        - synonym_exists_in_db (bool)
-        - related_term_exists_in_db (bool)
-        - related_key_terms_exist_in_db (bool)
-        - synonym_text (str or None)
-        - related_single_term_text (str or None)
-        - related_multiple_terms_text (str or None)
-    """
-```
+**State changes required:**
+- Add `search_terms_output: dict` field to `State` TypedDict in `agent.py`
+- Initialize in `reset_state`: `state['search_terms_output'] = {}`
 
-This function returns:
-1. **synonym_exists_in_db**: True if synonym found exists in database (evaluated regardless of key_term_not_in_db)
-2. **related_term_exists_in_db**: True if key term doesn't exist but exactly 1 related term exists in DB
-3. **related_key_terms_exist_in_db**: True if key term doesn't exist but 2+ related terms exist in DB
-4. **synonym_text**: Format: `"<synonym_name> is <synonym_description>"` or None
-5. **related_single_term_text**: Format: `"<term_in_query> does not exist in the tables I have access to. I returned the data for <related_term_name> which is <related_term_description>"` or None
-6. **related_multiple_terms_text**: Format (multi-line): `"- <term_1_name>: <term_1_definition>\n- <term_2_name>: <term_2_definition>"` or None
+**Implementation steps:**
 
-Here is how (use helper functions above)
+- In `create_objects_documentation` function, replace "Query instructions for key terms:" with "Key Terms:".
 
-- enhance scenario A: 
-Current scenario A becomes A1.
-New scenario: A2: queries for synonym / single related item. 
-      new function: check if the term asked by the user is not available in db but there is a synonym or a single related item. this new function needs to be taken into consideration by the orchestrator the first time when deciding between scenario C and A. if the sql_query that was being ran contains the synonym, where you update the state['current_sql_queries'], you also update the key_assumptions from the generate_answer_details, adding the synonym definition.
+- Move `create_objects_documentation` call from `initialization.py` to `reset_state` function in `agent.py`.
 
-- enhance scenario D: query ambiguous because term does not exist or is vague/undefined and there are multiple related terms available in db.
-Current scenario D becomes D1.
-New scenario: scenario D2: in extract_analytical_intent, before running the LLMCall that decides whether the question is clear or ambiguous (prompt_clear_or_ambiguous), check if the term asked by the user is not available in db and if related terms are more than 1 (make a function for it). if yes, don't run prompt_clear_or_ambiguous , set scenario D2 and set Notes = "The term is not available in db, here are the options: <parsed from terms>".
+- In `reset_state`:
+  1. Call `search_terms(state['current_question'], key_terms, synonyms, related_terms)`
+  2. Store result: `state['search_terms_output'] = search_terms_output`
+  3. Build `objects_documentation` using existing `create_objects_documentation` function format, but only include:
+     - Relevant key terms from `search_terms_output['key_terms']` (these already have `exists_in_database=True`)
+     - Format each: `"{term_name}: {term_definition}."` under "Key Terms:" section
+     - Append `synonym_docu` at the end (if not None)
+     - Append `related_terms_docu` at the end (if not None)
+  4. Store: `state['objects_documentation'] = objects_documentation`
 
-#3 The UI shows some numbers in a weird way.
-Need to investigate why. Maybe we move out from streamlit idk.
+3) Enhance scenario A: queries for synonym / single related item
 
+**3.1 Update orchestrator prompt**
+
+Change:
+- "If the user asks for data/metrics not available in the database schema → 'C'"
+
+To:
+- "If the user asks for data/metrics not available AND no synonyms or related terms exist in the database schema → 'C'"
+
+**3.2 Add Key Assumptions for synonym/related term usage**
+
+In `execute_sql_query` function, after updating `state['current_sql_queries']` with query results, add to `state['generate_answer_details']['key_assumptions']`:
+
+Get `search_terms_output` from state: `state['search_terms_output']`
+
+- If `search_terms_output['synonym_exists_in_db'] == True`:
+  - Add: `"{synonym_name} is {synonym_definition}"`
+  - Use: `search_terms_output['synonym']` to get name and definition
+
+- If `search_terms_output['related_term_exists_in_db'] == True`:
+  - If `related_term_searched_for` exists in `search_terms_output['key_terms']` AND its definition is not '':
+    - Add: `"{searched_term_name} ({searched_term_def}) does not exist in the tables I have access to. I returned the data for {related_term_name} ({related_term_def})"`
+  - Otherwise:
+    - Add: `"I returned the data for {related_term_name} ({related_term_def})"`
+  - Use: `search_terms_output['related_terms']` to get related term name/definition
+
+4) Enhance scenario D: handle multiple related terms
+
+In `extract_analytical_intent` function, **before** running `chain_1` (prompt_clear_or_ambiguous):
+
+Get `search_terms_output` from state: `state['search_terms_output']`
+
+- Check if `search_terms_output['related_terms_exists_in_db'] == True` (meaning > 1 related term found):
+  - Set `scenario = 'D'`
+  - Set `tool_name = 'generate_answer'`
+  - Create `ambiguity_explanation`:
+    - If `related_term_searched_for` exists in `search_terms_output['key_terms']` AND definition != '':
+      - `"The term {related_term_searched_for} is not available in the tables I have access to, but related terms are available."`
+    - Otherwise:
+      - `"The term {related_term_searched_for} can mean multiple things."`
+  - Create `agent_questions`: Format as list of options:
+    - `"Which option are you interested in? - {related_term_1_name}: {related_term_1_definition}. - {related_term_2_name}: {related_term_2_definition}. ..."`
+    - Use `search_terms_output['related_terms']` (list of dicts)
+  - Skip to "# update the state" section (bypass chain_1/chain_2/chain_3)
 
