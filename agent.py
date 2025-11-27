@@ -235,51 +235,60 @@ Important considerations about creating analytical intents:
         'objects_documentation': state['objects_documentation'],
         'question': state['current_question'],
         'messages_log': extract_msg_content_from_history(state['messages_log']),
-        'available_term_mappings': search_terms_output.get('synonyms_related_terms_docu', 'None')
+        'available_term_mappings': search_terms_output.get('documentation', 'None')
    }
 
   # Check for scenario D: multiple related terms exist and related_term_searched_for does not exist in DB
-  related_terms_exists_in_db = search_terms_output.get('related_terms_exists_in_db', False)
-  related_term_searched_for = search_terms_output.get('related_term_searched_for')
+  related_terms_data = search_terms_output.get('related_terms')
 
-  if related_terms_exists_in_db and related_term_searched_for and not related_term_searched_for.get('exists_in_db', False):
-      # Scenario D triggered
-      related_term_name = related_term_searched_for.get('name', '')
-      related_term_definition = related_term_searched_for.get('definition', '')
-      related_terms_list = search_terms_output.get('related_terms', [])
+  # Check if: related_terms exists, has multiple matches, and the searched_for term doesn't exist in DB
+  if related_terms_data and len(related_terms_data.get('matches', [])) > 1:
+      searched_for_exists_in_db = False
+      # Check if searched_for term exists in key_terms
+      searched_for_lower = related_terms_data.get('searched_for', '').lower()
+      for term in search_terms_output.get('key_terms', []):
+          if term.get('name', '').lower() == searched_for_lower:
+              searched_for_exists_in_db = True
+              break
 
-      # Create ambiguity_explanation based on whether the searched term has a definition
-      if related_term_definition != '':
-          ambiguity_explanation = f"The term {related_term_name} is not available in the tables I have access to, but related terms are available."
-      else:
-          ambiguity_explanation = f"The term {related_term_name} can mean multiple things."
+      if not searched_for_exists_in_db:
+          # Scenario D triggered
+          related_term_name = related_terms_data.get('searched_for', '')
+          related_term_definition = related_terms_data.get('definition', '')
+          related_terms_list = related_terms_data.get('matches', [])
 
-      # Create agent_questions from related_terms
-      agent_questions_list = []
-      for rel_term in related_terms_list:
-          rel_name = rel_term.get('name', '')
-          rel_def = rel_term.get('definition', '')
-          if rel_def:
-              agent_questions_list.append(f"{rel_name}: {rel_def}")
+          # Create ambiguity_explanation based on whether the searched term has a definition
+          if related_term_definition != '':
+              ambiguity_explanation = f"The term {related_term_name} is not available in the tables I have access to, but related terms are available."
           else:
-              agent_questions_list.append(f"{rel_name}")
+              ambiguity_explanation = f"The term {related_term_name} can mean multiple things."
 
-      # Format as "Which option are you interested in? - option1. - option2..."
-      agent_questions_formatted = "Which option are you interested in? " + " ".join([f"- {q}." for q in agent_questions_list])
+          # Create agent_questions from related_terms
+          agent_questions_list = []
+          for rel_term in related_terms_list:
+              rel_name = rel_term.get('name', '')
+              rel_def = rel_term.get('definition', '')
+              if rel_def:
+                  agent_questions_list.append(f"{rel_name}: {rel_def}")
+              else:
+                  agent_questions_list.append(f"{rel_name}")
 
-      # Update state
-      tool_name = 'generate_answer'
-      state['scenario'] = 'D'
-      state['analytical_intent'] = []
-      state['generate_answer_details']['ambiguity_explanation'] = ambiguity_explanation
-      state['generate_answer_details']['agent_questions'] = [agent_questions_formatted]
+          # Format as "Which option are you interested in? - option1. - option2..."
+          agent_questions_formatted = "Which option are you interested in? " + " ".join([f"- {q}." for q in agent_questions_list])
 
-      # control flow
-      action = AgentAction(tool='extract_analytical_intent', tool_input='', log='tool ran successfully')
-      state['intermediate_steps'].append(action)
-      state['intermediate_steps'].append(AgentAction(tool=tool_name, tool_input='', log=''))
+          # Update state
+          tool_name = 'generate_answer'
+          state['scenario'] = 'D'
+          state['analytical_intent'] = []
+          state['generate_answer_details']['ambiguity_explanation'] = ambiguity_explanation
+          state['generate_answer_details']['agent_questions'] = [agent_questions_formatted]
 
-      return state
+          # control flow
+          action = AgentAction(tool='extract_analytical_intent', tool_input='', log='tool ran successfully')
+          state['intermediate_steps'].append(action)
+          state['intermediate_steps'].append(AgentAction(tool=tool_name, tool_input='', log=''))
+
+          return state
 
   # determine if clear or ambiguous
   result_1 = chain_1.invoke(input_data)
@@ -610,11 +619,11 @@ def add_key_assumptions_from_term_substitutions(search_terms_output: dict) -> di
                 key_assumptions.append(f"{replacement_term} is {replacement_def}")
 
         elif relationship == 'related_term':
-            # Get searched_for definition from related_term_searched_for
+            # Get searched_for definition from related_terms
             searched_for_def = ''
-            related_term_searched_for = search_terms_output.get('related_term_searched_for')
-            if related_term_searched_for and related_term_searched_for.get('name', '').lower() == searched_for.lower():
-                searched_for_def = related_term_searched_for.get('definition', '')
+            related_terms_data = search_terms_output.get('related_terms')
+            if related_terms_data and related_terms_data.get('searched_for', '').lower() == searched_for.lower():
+                searched_for_def = related_terms_data.get('definition', '')
 
             if searched_for_def:
                 # "{searched_for} ({searched_for_def}) does not exist in the tables I have access to. I returned the data for {replacement_term} ({replacement_def})"
@@ -1191,9 +1200,9 @@ def add_key_terms_to_objects_documentation(base_documentation: str, search_terms
         if query_instructions:
             key_terms_text += f"    {query_instructions}\n"
 
-    # Append synonyms_related_terms_docu if exists
-    if search_terms_output.get('synonyms_related_terms_docu'):
-        key_terms_text += f"\n{search_terms_output['synonyms_related_terms_docu']}\n"
+    # Append documentation if exists
+    if search_terms_output.get('documentation'):
+        key_terms_text += f"\n{search_terms_output['documentation']}\n"
 
     # Combine everything
     return base_documentation + key_terms_text

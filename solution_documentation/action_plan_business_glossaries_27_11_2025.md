@@ -427,17 +427,21 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
 
     Returns dict with:
         - key_terms: list of dicts - key_terms that exist in database (exists_in_database=True)
-        - synonym_searched_for: dict or None - {'name': str, 'exists_in_db': bool, 'definition': str} - the word/phrase from user question that matched a synonym (definition from key_terms if available, empty string otherwise)
-        - synonym: dict or None - the key term that the synonym maps to
-        - synonym_exists_in_db: bool - True if synonym exists in database
-        - related_term_searched_for: dict or None - {'name': str, 'exists_in_db': bool, 'definition': str} - the word/phrase from user question that has related terms (definition from key_terms if available, empty string otherwise)
-        - related_term_exists_in_db: bool - True if exactly 1 related term exists in DB
-        - related_terms: dict or list or None - single dict if 1 related term, list of dicts if >1
-        - related_terms_exists_in_db: bool - True if >1 related terms exist in DB
-        - synonyms_related_terms_docu: str - combined documentation of synonyms and related terms
+        - synonym: dict or None - {
+            'searched_for': str - word/phrase from user question,
+            'maps_to': dict - the key term dict it maps to,
+            'definition': str - definition of searched_for from key_terms (empty string if not found)
+          }
+        - related_terms: dict or None - {
+            'searched_for': str - word/phrase from user question,
+            'matches': list of dicts - related term dicts (1 or more),
+            'definition': str - definition of searched_for from key_terms (empty string if not found)
+          }
+        - documentation: str - combined documentation string
           Format: "{synonym_word} is synonym with {key_term_name}" and/or
                   "{term_from_q} is related (similar but different) with: {rel1}, {rel2}"
-          (multi-line if multiple terms from question have related terms, empty string if none)
+          (multi-line if multiple terms, empty string if none)
+        - term_substitutions: list - initialized as empty list, populated later by LLM
     """
     user_question_lower = user_question.lower()
 
@@ -664,25 +668,41 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
                 docu_lines.append(f"{term_from_q} is related (similar but different) with: {', '.join(rel_names)}")
             related_terms_docu = '\n'.join(docu_lines)
 
-    # Build synonyms_related_terms_docu by combining synonym_docu and related_terms_docu
+    # Build documentation by combining synonym_docu and related_terms_docu
     docu_parts = []
     if synonym_docu:
         docu_parts.append(synonym_docu)
     if related_terms_docu:
         docu_parts.append(related_terms_docu)
 
-    synonyms_related_terms_docu = '\n'.join(docu_parts) if docu_parts else ''
+    documentation = '\n'.join(docu_parts) if docu_parts else ''
+
+    # Build simplified synonym structure
+    synonym_result = None
+    if synonym_exists_in_db and synonym and synonym_searched_for:
+        synonym_result = {
+            'searched_for': synonym_searched_for['name'],
+            'maps_to': synonym,
+            'definition': synonym_searched_for.get('definition', '')
+        }
+
+    # Build simplified related_terms structure
+    related_terms_result = None
+    if related_terms_found and related_term_searched_for:
+        # related_terms_found can be a single dict or a list of dicts
+        matches = related_terms_found if isinstance(related_terms_found, list) else [related_terms_found]
+        related_terms_result = {
+            'searched_for': related_term_searched_for['name'],
+            'matches': matches,
+            'definition': related_term_searched_for.get('definition', '')
+        }
 
     return {
         'key_terms': key_terms_found,
-        'synonym_searched_for': synonym_searched_for,
-        'synonym': synonym,
-        'synonym_exists_in_db': synonym_exists_in_db,
-        'related_term_searched_for': related_term_searched_for,
-        'related_term_exists_in_db': related_term_exists_in_db,
-        'related_terms': related_terms_found,
-        'related_terms_exists_in_db': related_terms_exists_in_db,
-        'synonyms_related_terms_docu': synonyms_related_terms_docu
+        'synonym': synonym_result,
+        'related_terms': related_terms_result,
+        'documentation': documentation,
+        'term_substitutions': []  # Initialized empty, populated later by LLM
     }
 ```
 
