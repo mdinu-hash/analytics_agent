@@ -33,7 +33,13 @@ from src.init.initialization import (
 from src.init.llm_util import create_prompt_template, get_token_usage, calculate_chat_history_tokens, llm_provider
 
 # Import PostgreSQL database utility
-from src.init.init_demo_database.demo_database_util import execute_query
+from src.init.init_demo_database.demo_database_util import execute_query, create_objects_documentation
+
+# Import business glossary
+from src.init.business_glossary import key_terms, synonyms, related_terms, search_terms
+
+# Import database schema
+from src.init.database_schema import database_schema, table_relationships
 
 _progress_queue = queue.Queue()  # Global shared progress queue
 
@@ -64,6 +70,7 @@ class State(TypedDict):
  generate_answer_details: dict
  llm_answer: BaseMessage
  scenario: str
+ search_terms_output: dict  # contains term_substitutions as a key
 
 def extract_msg_content_from_history(messages_log:list):
  ''' from a list of base messages, extract just the content '''
@@ -76,14 +83,21 @@ class ClearOrAmbiguous(TypedDict):
   ''' conclusion about the analytical intent extraction process '''
   analytical_intent_clearness: Annotated[Literal["Analytical Intent Extracted", "Analytical Intent Ambiguous"],"conclusion about the analytical intent extraction process"] 
 
+class TermSubstitution(TypedDict):
+  ''' term substitution made when creating analytical intent '''
+  relationship: Annotated[Literal["synonym", "related_term"], "type of relationship between terms"]
+  searched_for: Annotated[str, "term from user question"]
+  replacement_term: Annotated[str, "term used in analytical intent"]
+
 class AnalyticalIntents(TypedDict):
-  ''' list of analytical intents '''
+  ''' list of analytical intents with term substitutions '''
   analytical_intent: Annotated[Union[list[str], None] ,"natural language descriptions to capture the analytical intents"]
+  term_substitutions: Annotated[list[TermSubstitution], "list of term substitutions made (empty list if none)"]
 
 class AmbiguityAnalysis(TypedDict):
   ''' analysis of ambiguous question with explanation and alternatives '''
   ambiguity_explanation: Annotated[str, "brief explanation of what makes the question ambiguous"]
-  agent_questions: Annotated[list[str], "2-3 alternative analytical intents as questions"]                                      
+  agent_questions: Annotated[list[str], "2-3 alternative analytical intents as questions"]
 
 @tool
 def extract_analytical_intent(state:State):
@@ -110,13 +124,16 @@ def extract_analytical_intent(state:State):
     No level of details specified -> use highest aggregation level -> CLEAR.
 
   - You can deduct the analytical intent from the conversation history.
+
+  - User questions with terms referring to a single related term are CLEAR. See here: {available_term_mappings}.
+    Example: "A is related (similar but different) with: B".
   
   *** The question is AMBIGUOUS if ***
   - Different source columns would give different insights.     
 
   - Different metrics could answer the same question:
     Example: "What is the top client?" is ambigous in a database schema that contains multiple metrics that can answer the question (highest value of sales / highest number of sales). 
- 
+
   Response format:
   If CLEAR -> "Analytical Intent Extracted".
   If AMBIGUOUS -> "Analytical Intent Ambiguous". 
@@ -142,7 +159,7 @@ Important considerations about creating analytical intents:
   Important considerations about time based analysis:
     - If the source columns are from tables showing evolutions of metrics over time, clearly specify the time range to apply the analysis on:
       Example: If the question does not specify a time range, specify a recent period like last 12 months, last 3 months.
-    - Use explicit date filters instead of relative expressions like "last 12 months". 
+    - Use explicit date filters instead of relative expressions like "last 12 months".
     - Derive actual date ranges from the database schema under "Important considerations about dates available".
     - Group the specified period in time-based groups (monthly, quarterly) and compare first with last group.
 
@@ -151,6 +168,18 @@ Important considerations about creating analytical intents:
     where each search builds upon previous results to examine relationships, correlations, or comparative patterns between variables.
   - Break it down into sequential steps where each represents a distinct analytical intent:
     Template: "Step 1: <analytical intent 1>. Step 2: <analytical intent 2>. Step 3: <analytical intent 3>"
+
+  Important: Track term substitutions
+  - Available term mappings (synonyms and related terms):
+    {available_term_mappings}
+
+  - ONLY use the term mappings provided above when deciding on substitutions.
+  - If you used a synonym or related term from the available term mappings instead of the user's exact terminology, report it in term_substitutions.
+  - For each substitution, specify:
+    * relationship: "synonym" if the terms mean the same thing, "related_term" if they're similar but different concepts.
+    * searched_for: the exact term from the user's question.
+    * replacement_term: the term from the database schema you used in the analytical intent.
+  - If no substitutions were made, return an empty list for term_substitutions.
     """
 
   sys_prompt_ambiguous = """
@@ -200,11 +229,57 @@ Important considerations about creating analytical intents:
   chain_3= prompt_ambiguous | llm.with_structured_output(AmbiguityAnalysis)
 
   # Prepare common input data
+  search_terms_output = state['search_terms_output']
+
   input_data = {
-        'objects_documentation': state['objects_documentation'], 
-        'question': state['current_question'], 
-        'messages_log': extract_msg_content_from_history(state['messages_log'])
+        'objects_documentation': state['objects_documentation'],
+        'question': state['current_question'],
+        'messages_log': extract_msg_content_from_history(state['messages_log']),
+        'available_term_mappings': search_terms_output.get('synonyms_related_terms_docu', 'None')
    }
+
+  # Check for scenario D: multiple related terms exist and related_term_searched_for does not exist in DB
+  related_terms_exists_in_db = search_terms_output.get('related_terms_exists_in_db', False)
+  related_term_searched_for = search_terms_output.get('related_term_searched_for')
+
+  if related_terms_exists_in_db and related_term_searched_for and not related_term_searched_for.get('exists_in_db', False):
+      # Scenario D triggered
+      related_term_name = related_term_searched_for.get('name', '')
+      related_term_definition = related_term_searched_for.get('definition', '')
+      related_terms_list = search_terms_output.get('related_terms', [])
+
+      # Create ambiguity_explanation based on whether the searched term has a definition
+      if related_term_definition != '':
+          ambiguity_explanation = f"The term {related_term_name} is not available in the tables I have access to, but related terms are available."
+      else:
+          ambiguity_explanation = f"The term {related_term_name} can mean multiple things."
+
+      # Create agent_questions from related_terms
+      agent_questions_list = []
+      for rel_term in related_terms_list:
+          rel_name = rel_term.get('name', '')
+          rel_def = rel_term.get('definition', '')
+          if rel_def:
+              agent_questions_list.append(f"{rel_name}: {rel_def}")
+          else:
+              agent_questions_list.append(f"{rel_name}")
+
+      # Format as "Which option are you interested in? - option1. - option2..."
+      agent_questions_formatted = "Which option are you interested in? " + " ".join([f"- {q}." for q in agent_questions_list])
+
+      # Update state
+      tool_name = 'generate_answer'
+      state['scenario'] = 'D'
+      state['analytical_intent'] = []
+      state['generate_answer_details']['ambiguity_explanation'] = ambiguity_explanation
+      state['generate_answer_details']['agent_questions'] = [agent_questions_formatted]
+
+      # control flow
+      action = AgentAction(tool='extract_analytical_intent', tool_input='', log='tool ran successfully')
+      state['intermediate_steps'].append(action)
+      state['intermediate_steps'].append(AgentAction(tool=tool_name, tool_input='', log=''))
+
+      return state
 
   # determine if clear or ambiguous
   result_1 = chain_1.invoke(input_data)
@@ -213,8 +288,10 @@ Important considerations about creating analytical intents:
   if result_1['analytical_intent_clearness'] == "Analytical Intent Extracted":
         # create analytical intents
         result_2 = chain_2.invoke(input_data)
-        # next tool to call 
-        tool_name = 'create_sql_query_or_queries' 
+        # Store term_substitutions in search_terms_output
+        state['search_terms_output']['term_substitutions'] = result_2.get('term_substitutions', [])
+        # next tool to call
+        tool_name = 'create_sql_query_or_queries'
         output = {
             'scenario': 'A',
             'analytical_intent': result_2['analytical_intent'],
@@ -502,6 +579,62 @@ def correct_syntax_sql_query(sql_query: str, error:str, objects_documentation: s
  sql_query = result['query']
  return sql_query
 
+def add_key_assumptions_from_term_substitutions(search_terms_output: dict) -> dict:
+    """
+    Creates Key Assumptions based on term substitutions reported by LLM.
+
+    Args:
+        search_terms_output: Output from search_terms function (contains term_substitutions)
+
+    Returns:
+        dict with 'key_assumptions': list of assumption strings
+    """
+    key_assumptions = []
+    term_substitutions = search_terms_output.get('term_substitutions', [])
+
+    for substitution in term_substitutions:
+        relationship = substitution.get('relationship')
+        searched_for = substitution.get('searched_for', '')
+        replacement_term = substitution.get('replacement_term', '')
+
+        # Look up definitions for the replacement term from search_terms_output
+        replacement_def = ''
+        for term in search_terms_output.get('key_terms', []):
+            if term.get('name', '').lower() == replacement_term.lower():
+                replacement_def = term.get('definition', '')
+                break
+
+        if relationship == 'synonym':
+            # "{replacement_term} is {replacement_def}"
+            if replacement_def:
+                key_assumptions.append(f"{replacement_term} is {replacement_def}")
+
+        elif relationship == 'related_term':
+            # Get searched_for definition from related_term_searched_for
+            searched_for_def = ''
+            related_term_searched_for = search_terms_output.get('related_term_searched_for')
+            if related_term_searched_for and related_term_searched_for.get('name', '').lower() == searched_for.lower():
+                searched_for_def = related_term_searched_for.get('definition', '')
+
+            if searched_for_def:
+                # "{searched_for} ({searched_for_def}) does not exist in the tables I have access to. I returned the data for {replacement_term} ({replacement_def})"
+                if replacement_def:
+                    key_assumptions.append(
+                        f"{searched_for} ({searched_for_def}) does not exist in the tables I have access to. I returned the data for {replacement_term} ({replacement_def})"
+                    )
+                else:
+                    key_assumptions.append(
+                        f"{searched_for} ({searched_for_def}) does not exist in the tables I have access to. I returned the data for {replacement_term}"
+                    )
+            else:
+                # "I returned the data for {replacement_term} ({replacement_def})"
+                if replacement_def:
+                    key_assumptions.append(f"I returned the data for {replacement_term} ({replacement_def})")
+                else:
+                    key_assumptions.append(f"I returned the data for {replacement_term}")
+
+    return {'key_assumptions': key_assumptions}
+
 def execute_sql_query(state:State):
   """ executes the sql query and retrieve the result """
 
@@ -555,6 +688,12 @@ def execute_sql_query(state:State):
          # Append explanation to key_assumptions
          if explanation.get('explanation') and isinstance(explanation['explanation'], list):
              state['generate_answer_details']['key_assumptions'].extend(explanation['explanation'])
+
+         # Add Key Assumptions for term substitutions
+         assumptions_output = add_key_assumptions_from_term_substitutions(state['search_terms_output'])
+         if assumptions_output.get('key_assumptions'):
+             state['generate_answer_details']['key_assumptions'].extend(assumptions_output['key_assumptions'])
+
          break
 
        # if the sql query exceeds output context window and there is more room for iterations, refine the query
@@ -739,14 +878,11 @@ Latest user message:
 {question}.
 
 The last user prompt could be interpreted in multiple ways.
-Here's what makes it ambiguous: {ambiguity_explanation}.
-Suggest these next steps for the user: {agent_questions}.
-
-Response guidelines:
-- User to specify which analysis it wants
-- Respond in clear, non-technical language.
-- Be concise.
-- Keep it simple and conversational.""",
+Explain the user this ambiguity reason: {ambiguity_explanation}.
+And ask user to specify which of these analysis it wants: {agent_questions}.
+Respond in clear, non-technical language.
+Be concise.
+Keep it simple and conversational.""",
     'Invoke_Params': lambda state: {
         'messages_log': state['messages_log'],
         'question': state['current_question'],
@@ -951,7 +1087,7 @@ def orchestrator(state:State):
        - If the same question was already answered in conversation history → "B"
 
     Step 2. Check if requested data exists in schema:
-      - If the user asks for data/metrics not available in the database schema → "C"
+      - If the user asks for data/metrics not available AND no synonyms or related terms exist in the database schema → "C"
     
     Step 3. Otherwise → "Continue".
     """
@@ -1029,6 +1165,39 @@ def run_control_flow(state:State):
   
 # assemble graph
 
+def add_key_terms_to_objects_documentation(base_documentation: str, search_terms_output: dict) -> str:
+    """
+    Adds relevant key terms section to the base objects documentation.
+
+    Args:
+        base_documentation: Base documentation string (tables, relationships, date ranges)
+        search_terms_output: Output from search_terms() function containing relevant terms
+
+    Returns:
+        Complete documentation string with key terms section added
+    """
+    # Build custom Key Terms section with only relevant terms
+    key_terms_text = "\nKey Terms:\n"
+    for term in search_terms_output['key_terms']:
+        term_name = term.get('name', '')
+        term_definition = term.get('definition', '')
+        query_instructions = term.get('query_instructions', '')
+
+        if term_definition:
+            key_terms_text += f"  - {term_name}: {term_definition}\n"
+        else:
+            key_terms_text += f"  - {term_name}\n"
+
+        if query_instructions:
+            key_terms_text += f"    {query_instructions}\n"
+
+    # Append synonyms_related_terms_docu if exists
+    if search_terms_output.get('synonyms_related_terms_docu'):
+        key_terms_text += f"\n{search_terms_output['synonyms_related_terms_docu']}\n"
+
+    # Combine everything
+    return base_documentation + key_terms_text
+
 # function to reset the state current queries (to add in the start of graph execution)
 def reset_state(state:State):
     state['current_sql_queries'] = []
@@ -1041,7 +1210,15 @@ def reset_state(state:State):
     }
     state['analytical_intent'] = []
     state['scenario'] = ''
-    state['objects_documentation'] = objects_documentation
+
+    # Call search_terms to get relevant terms for this question
+    search_terms_output = search_terms(state['current_question'], key_terms, synonyms, related_terms)
+    search_terms_output['term_substitutions'] = []  # Will be populated in extract_analytical_intent
+    state['search_terms_output'] = search_terms_output
+
+    # Add relevant key terms to the base objects_documentation
+    state['objects_documentation'] = add_key_terms_to_objects_documentation(objects_documentation, search_terms_output)
+
     state['sql_dialect'] = sql_dialect
     return state
 

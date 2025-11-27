@@ -183,22 +183,7 @@ def create_objects_documentation(database_schema, table_relationships, key_terms
         date_range += "".join(date_range_entries)
         objects_documentation.append(date_range)
 
-    # Add key terms with query instructions
-    key_terms_text = "\nQuery instructions for key terms:\n"
-    for term in key_terms:
-        term_name = term['name']
-        term_definition = term['definition']
-        query_instructions = term['query_instructions']
-
-        if term_definition:
-            key_terms_text += f"  - {term_name}: {term_definition}\n"
-        else:
-            key_terms_text += f"  - {term_name}\n"
-
-        if query_instructions:
-            key_terms_text += f"    {query_instructions}\n"
-
-    objects_documentation.append(key_terms_text)
+    # Key terms section removed - will be added dynamically in reset_state based on search_terms
 
     # Join all parts
     return "\n".join(objects_documentation)
