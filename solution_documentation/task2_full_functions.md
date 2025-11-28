@@ -1,126 +1,8 @@
-# Business Terms Glossary
-from difflib import get_close_matches
+# Task #2: Full Function Implementations
 
-key_terms = [
-    # ========================= ASSETS =========================
-     {
-        'name': 'Assets Under Management',
-        'definition': 'Total market value of all client investments',
-        'query_instructions': '''Use account_assets from fact_account_monthly table. 
-         Don't aggregate over time as this measure is semi-additive. 
-         You can aggregate this measure at advisor, household, or business line level.''',
-        'exists_in_database': True
-    },
-     {
-        'name': 'advisory assets',
-        'definition': 'Assets in Managed Portfolio and SMA business lines',
-        'query_instructions': ''' Aggregate fact_account_monthly.account_assets filtered for business_line_name in ('Separately Managed Account','Managed Portfolio').
-                                  Don't aggregate over time as this measure is semi-additive.''',
-        'exists_in_database': True
-    },
-     {
-        'name': 'liquid assets',
-        'definition': 'assets easily converted to cash',
-        'query_instructions': '',
-        'exists_in_database': False
-    },
-     {
-        'name': 'Household',
-        'definition': 'business or individual with a contractual agreement with advisors',
-        'query_instructions': "to get recent records, filter for household.household_status = 'Active' and household.to_date = '9999-12-31'",
-        'exists_in_database': True
-    } ,
+## 1) search_terms function (business_glossary.py)
 
-         {
-        'name': 'Advisor',
-        'definition': '',
-        'query_instructions': "to get recent records, filter for advisors.advisor_status = 'Active' and advisors.to_date = '9999-12-31'",
-        'exists_in_database': True
-    } ,
-    {
-        'name': 'Account',
-        'definition': '',
-        'query_instructions': "to get recent records, filter for account.account_status = 'Active' and account.to_date = '9999-12-31'",
-        'exists_in_database': True
-    } ,
-     {
-        'name': 'high net worth',
-        'definition': 'If household_assets >= $1M.',
-        'query_instructions': 'query fact_household_monthly for high_net_worth_flag = True',
-        'exists_in_database': False
-    },
-# ========================= REVENUE STATEMENT =========================
-
-     {
-        'name': 'payout',
-        'definition': 'Dollar amount paid to advisor',
-        'query_instructions': 'Sum of fact_revenue_monthly.advisor_payout_amount',
-        'exists_in_database': True
-    } ,
-
-     {
-        'name': 'net revenue',
-        'definition': 'Revenue retained by Capital Partners',
-        'query_instructions': 'Sum of fact_revenue_monthly.net_revenue',
-        'exists_in_database': True
-    },
-     {
-        'name': 'distribution',
-        'definition': 'advisor payout after tech fees are deducted',
-        'query_instructions': '',
-        'exists_in_database': False
-    }
-]
-
-# Synonyms - maps user terms to key_terms. Add the synonym to the left and the key term (defined) in the right
-synonyms = {
-    'aum': 'assets under management',
-    'total assets': 'assets under management',
-    'client': 'household',
-    'hnw': 'high net worth',
-    'production': 'payout',
-}
-
-# Related terms - terms that are conceptually related
-related_terms = [
-    ['payment','net revenue', 'payout','distribution'],
-    ['advisory assets','producing assets','liquid assets']
-]
-
-
-def check_glossary_consistency():
-    """
-    Checks if all terms referenced in synonyms and related_terms exist in key_terms.
-    Prints messages for missing terms.
-    """
-    # Get all term names from key_terms (normalized to lowercase for comparison)
-    key_term_names = {term['name'].lower() for term in key_terms}
-
-    missing_terms = set()
-
-    # Check synonyms - the values (right side) should exist in key_terms
-    for synonym, key_term in synonyms.items():
-        key_term_normalized = key_term.replace('_', ' ').lower()
-        if key_term_normalized not in key_term_names:
-            missing_terms.add(key_term)
-
-    # Print messages for missing terms
-    if missing_terms:
-        print("⚠️  Missing terms found in business_glossary:")
-        print("="*80)
-        for term in sorted(missing_terms):
-            print(f"\nPlease add the following term to key_terms:")
-            print(f"{{")
-            print(f"    'name': '{term}',")
-            print(f"    'definition': '<ADD DEFINITION HERE>',")
-            print(f"    'query_instructions': '<ADD QUERY INSTRUCTIONS OR LEAVE BLANK IF NOT IN DATABASE>',")
-            print(f"    'exists_in_database': <True or False>")
-            print(f"}},")
-        print("\n" + "="*80)
-    else:
-        print("✅ All terms in synonyms exist in key_terms")
-
-
+```python
 def search_terms(user_question, key_terms, synonyms, related_terms):
     """
     Searches for key terms, synonyms, and related terms in a user question.
@@ -128,25 +10,17 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
 
     Returns dict with:
         - key_terms: list of dicts - key_terms that exist in database (exists_in_database=True)
-        - synonym: dict or None
-          If 1 synonym found: {
-            'searched_for': str - word/phrase from user question,
-            'maps_to': dict - the key term dict it maps to,
-            'definition': str - definition of searched_for from key_terms (empty string if not found)
-          }
-          If multiple synonyms found: {
-            'matches': list of dicts - each dict has 'searched_for', 'maps_to', 'definition'
-          }
-        - related_terms: dict or None - {
-            'searched_for': str - word/phrase from user question,
-            'matches': list of dicts - related term dicts (1 or more),
-            'definition': str - definition of searched_for from key_terms (empty string if not found)
-          }
-        - documentation: str - combined documentation string
-          Format: "{synonym_word} is synonym with {key_term_name}" (one line per synonym) and/or
+        - synonym_searched_for: dict or None - {'name': str, 'exists_in_db': bool, 'definition': str} - the word/phrase from user question that matched a synonym (definition from key_terms if available, empty string otherwise)
+        - synonym: dict or None - the key term that the synonym maps to
+        - synonym_exists_in_db: bool - True if synonym exists in database
+        - related_term_searched_for: dict or None - {'name': str, 'exists_in_db': bool, 'definition': str} - the word/phrase from user question that has related terms (definition from key_terms if available, empty string otherwise)
+        - related_term_exists_in_db: bool - True if exactly 1 related term exists in DB
+        - related_terms: dict or list or None - single dict if 1 related term, list of dicts if >1
+        - related_terms_exists_in_db: bool - True if >1 related terms exist in DB
+        - synonyms_related_terms_docu: str - combined documentation of synonyms and related terms
+          Format: "{synonym_word} is synonym with {key_term_name}" and/or
                   "{term_from_q} is related (similar but different) with: {rel1}, {rel2}"
-          (multi-line if multiple terms, empty string if none)
-        - term_substitutions: list - initialized as empty list, populated later by LLM
+          (multi-line if multiple terms from question have related terms, empty string if none)
     """
     user_question_lower = user_question.lower()
 
@@ -155,15 +29,16 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
 
     # Initialize all return values
     key_terms_found = []
+    synonym_searched_for = None  # Will be dict: {'name': str, 'exists_in_db': bool, 'definition': str}
+    synonym = None
+    synonym_exists_in_db = False
     synonym_docu = None
-    related_term_searched_for = None  # Will be dict: {'name': str, 'exists_in_db': bool}
+    related_term_searched_for = None  # Will be dict: {'name': str, 'exists_in_db': bool, 'definition': str}
     related_term_exists_in_db = False
     related_terms_found = None
     related_terms_exists_in_db = False
     related_terms_docu = None
 
-    # Track all synonym matches (can be multiple)
-    all_synonym_matches = []
     # Track all related terms matches (can be multiple)
     all_related_matches = []
 
@@ -195,7 +70,7 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
                 if term.get('exists_in_database', False):
                     key_terms_found.append(term)
 
-    # 2. Check for synonyms (process ALL matches, not just first)
+    # 2. Check for synonyms
     for syn_word, key_term_ref in synonyms.items():
         syn_word_lower = syn_word.lower()
         found_synonym = False
@@ -228,6 +103,9 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
 
                 # Check if synonym exists in database
                 if actual_term.get('exists_in_database', False):
+                    synonym_exists_in_db = True
+                    synonym = actual_term
+
                     # Check if the synonym word itself exists in DB as a key term and get definition
                     syn_word_exists_in_db = False
                     syn_word_definition = ''
@@ -235,18 +113,18 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
                         syn_word_exists_in_db = key_terms_lookup[syn_word.lower()].get('exists_in_database', False)
                         syn_word_definition = key_terms_lookup[syn_word.lower()].get('definition', '')
 
-                    # Store this synonym match
-                    all_synonym_matches.append({
-                        'searched_for': syn_word,
-                        'maps_to': actual_term,
-                        'definition': syn_word_definition
-                    })
+                    synonym_searched_for = {'name': syn_word, 'exists_in_db': syn_word_exists_in_db, 'definition': syn_word_definition}
 
                     # Add to key_terms_found
                     if actual_term not in key_terms_found:
                         key_terms_found.append(actual_term)
 
-                    # Continue to check other synonyms (don't break)
+                    # Create synonym_docu: "<term_1> is synonym with <term_2>"
+                    # term_1 = word from user question, term_2 = synonym name that exists in DB
+                    syn_name = actual_term.get('name', '')
+                    synonym_docu = f"{syn_word} is synonym with {syn_name}"
+
+                    break  # Only process first synonym match
 
     # 3. Check for related terms (process ALL matches, not just first)
     for term_group in related_terms:
@@ -369,51 +247,75 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
                 docu_lines.append(f"{term_from_q} is related (similar but different) with: {', '.join(rel_names)}")
             related_terms_docu = '\n'.join(docu_lines)
 
-    # Build synonym documentation from all matches
-    synonym_docu_parts = []
-    for syn_match in all_synonym_matches:
-        searched_for = syn_match['searched_for']
-        maps_to_name = syn_match['maps_to'].get('name', '')
-        synonym_docu_parts.append(f"{searched_for} is synonym with {maps_to_name}")
-    synonym_docu = '\n'.join(synonym_docu_parts) if synonym_docu_parts else ''
-
-    # Build documentation by combining synonym_docu and related_terms_docu
+    # Build synonyms_related_terms_docu by combining synonym_docu and related_terms_docu
     docu_parts = []
     if synonym_docu:
         docu_parts.append(synonym_docu)
     if related_terms_docu:
         docu_parts.append(related_terms_docu)
 
-    documentation = '\n'.join(docu_parts) if docu_parts else ''
-
-    # Build simplified synonym structure
-    synonym_result = None
-    if all_synonym_matches:
-        if len(all_synonym_matches) == 1:
-            # Single synonym - return as single dict for backward compatibility
-            synonym_result = all_synonym_matches[0]
-        else:
-            # Multiple synonyms - return as dict with matches list
-            synonym_result = {
-                'matches': all_synonym_matches
-            }
-
-    # Build simplified related_terms structure
-    related_terms_result = None
-    if related_terms_found and related_term_searched_for:
-        # related_terms_found can be a single dict or a list of dicts
-        matches = related_terms_found if isinstance(related_terms_found, list) else [related_terms_found]
-        related_terms_result = {
-            'searched_for': related_term_searched_for['name'],
-            'matches': matches,
-            'definition': related_term_searched_for.get('definition', '')
-        }
+    synonyms_related_terms_docu = '\n'.join(docu_parts) if docu_parts else ''
 
     return {
         'key_terms': key_terms_found,
-        'synonym': synonym_result,
-        'related_terms': related_terms_result,
-        'documentation': documentation,
-        'term_substitutions': []  # Initialized empty, populated later by LLM
+        'synonym_searched_for': synonym_searched_for,
+        'synonym': synonym,
+        'synonym_exists_in_db': synonym_exists_in_db,
+        'related_term_searched_for': related_term_searched_for,
+        'related_term_exists_in_db': related_term_exists_in_db,
+        'related_terms': related_terms_found,
+        'related_terms_exists_in_db': related_terms_exists_in_db,
+        'synonyms_related_terms_docu': synonyms_related_terms_docu
     }
+```
 
+## 2) add_key_terms_to_objects_documentation function (agent.py)
+
+```python
+def add_key_terms_to_objects_documentation(base_documentation: str, search_terms_output: dict) -> str:
+    """
+    Adds relevant key terms section to the base objects documentation.
+
+    Args:
+        base_documentation: Base documentation string (tables, relationships, date ranges)
+        search_terms_output: Output from search_terms() function containing relevant terms
+
+    Returns:
+        Complete documentation string with key terms section added
+    """
+    # Build custom Key Terms section with only relevant terms
+    key_terms_text = "\nKey Terms:\n"
+    for term in search_terms_output['key_terms']:
+        term_name = term.get('name', '')
+        term_definition = term.get('definition', '')
+        query_instructions = term.get('query_instructions', '')
+
+        if term_definition:
+            key_terms_text += f"  - {term_name}: {term_definition}\n"
+        else:
+            key_terms_text += f"  - {term_name}\n"
+
+        if query_instructions:
+            key_terms_text += f"    {query_instructions}\n"
+
+    # Append synonyms_related_terms_docu if exists
+    if search_terms_output.get('synonyms_related_terms_docu'):
+        key_terms_text += f"\n{search_terms_output['synonyms_related_terms_docu']}\n"
+
+    # Combine everything
+    return base_documentation + key_terms_text
+```
+
+## Note: Prompts in extract_analytical_intent
+
+The prompts in `extract_analytical_intent` function have been iteratively refined during testing. The current implementation in agent.py should be considered authoritative. Key differences from initial documentation:
+
+**sys_prompt_clear_or_ambiguous** includes:
+```
+- User questions with terms referring to a single related term are CLEAR. See here: {available_term_mappings}.
+  Example: "A is related (similar but different) with: B".
+```
+
+This specifies that user questions with terms that map to exactly ONE related term should be considered CLEAR (not ambiguous).
+
+**Recommendation**: Review `extract_analytical_intent` function (lines 102-320 in agent.py) for the complete, tested prompt implementations.

@@ -614,6 +614,22 @@ def add_key_assumptions_from_term_substitutions(search_terms_output: dict) -> di
                 break
 
         if relationship == 'synonym':
+            # Get searched_for definition from synonym data (handle both single and multiple synonyms)
+            searched_for_def = ''
+            synonym_data = search_terms_output.get('synonym')
+            if synonym_data:
+                # Check if single synonym or multiple synonyms
+                if 'matches' in synonym_data:
+                    # Multiple synonyms - search in matches list
+                    for syn_match in synonym_data['matches']:
+                        if syn_match.get('searched_for', '').lower() == searched_for.lower():
+                            searched_for_def = syn_match.get('definition', '')
+                            break
+                else:
+                    # Single synonym
+                    if synonym_data.get('searched_for', '').lower() == searched_for.lower():
+                        searched_for_def = synonym_data.get('definition', '')
+
             # "{replacement_term} is {replacement_def}"
             if replacement_def:
                 key_assumptions.append(f"{replacement_term} is {replacement_def}")
@@ -650,10 +666,13 @@ def execute_sql_query(state:State):
   for query_index, q in enumerate(state['current_sql_queries']):
 
     if state['current_sql_queries'][query_index]['result'] == '':
-     sql_query = q['query']
+     refinement_count = 0
 
-     # refine the query 3 times if necessary.
-     for i in range(3):
+     # refine the query up to 3 times if necessary.
+     while refinement_count < 3:
+
+       # Always read the current query from state to ensure we're executing the latest refined version
+       sql_query = state['current_sql_queries'][query_index]['query']
 
        # executes the query and if it throws an error, correct it (max 3x times) then execute it again.
        try:
@@ -671,6 +690,8 @@ def execute_sql_query(state:State):
        while 'Error' in sql_query_result and attempt < 3:
             error = sql_query_result
             sql_query = correct_syntax_sql_query(sql_query,error,objects_documentation,state['sql_dialect'])
+            # Update state with corrected query immediately
+            state['current_sql_queries'][query_index]['query'] = sql_query
 
             try:
                 results = execute_query(sql_query, connection_string)
@@ -706,13 +727,23 @@ def execute_sql_query(state:State):
          break
 
        # if the sql query exceeds output context window and there is more room for iterations, refine the query
-       else:
-        sql_query = refine_sql_query(state['analytical_intent'],sql_query,state['objects_documentation'],state['sql_dialect'])['query']
+       elif refinement_count < 2:  # Can refine max 2 times
+        # Get the specific analytical intent for this query (use index if available, otherwise join all)
+        if query_index < len(state['analytical_intent']):
+            analytical_intent = state['analytical_intent'][query_index]
+        else:
+            analytical_intent = ' | '.join(state['analytical_intent']) if state['analytical_intent'] else ''
+        sql_query = refine_sql_query(analytical_intent,sql_query,state['objects_documentation'],state['sql_dialect'])
+        # Update state with refined query immediately
+        state['current_sql_queries'][query_index]['query'] = sql_query
+        refinement_count += 1
+        # Continue loop to execute refined query immediately
 
        # if there is no more room for sql query iterations and the result still exceeds context window, throw a message
-    else:
+       else:
         state['current_sql_queries'][query_index]['result'] = 'Query result too large after 3 refinements.'
         state['generate_answer_details']['key_assumptions'].append("Refinement failed.")
+        break
       
   return state
 
@@ -779,12 +810,12 @@ def refine_sql_query(analytical_intent: str, sql_query: str, objects_documentati
  prompt = create_prompt_template('system', system_prompt)
  chain = prompt | llm.with_structured_output(OutputAsASingleQuery)
 
- sql_query = chain.invoke({'analytical_intent': analytical_intent,
+ result = chain.invoke({'analytical_intent': analytical_intent,
                'sql_query':sql_query,
                'objects_documentation':objects_documentation,
                'sql_dialect':sql_dialect}
                )
- return sql_query
+ return result['query']
 
 # Each scenario
 
@@ -1163,12 +1194,12 @@ def run_control_flow(state:State):
     # creating & executing new queries
     elif tool_name == 'create_sql_query_or_queries':
       state = create_sql_query_or_queries.invoke({'state':state})
-      execute_sql_query(state)
+      state = execute_sql_query(state)
 
     # generate answer & manage chat history.
-    elif tool_name == 'generate_answer':  
-      state = generate_answer.invoke({'state':state}) 
-      manage_memory_chat_history(state)
+    elif tool_name == 'generate_answer':
+      state = generate_answer.invoke({'state':state})
+      state = manage_memory_chat_history(state)
 
     return state
   

@@ -427,10 +427,14 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
 
     Returns dict with:
         - key_terms: list of dicts - key_terms that exist in database (exists_in_database=True)
-        - synonym: dict or None - {
+        - synonym: dict or None
+          If 1 synonym found: {
             'searched_for': str - word/phrase from user question,
             'maps_to': dict - the key term dict it maps to,
             'definition': str - definition of searched_for from key_terms (empty string if not found)
+          }
+          If multiple synonyms found: {
+            'matches': list of dicts - each dict has 'searched_for', 'maps_to', 'definition'
           }
         - related_terms: dict or None - {
             'searched_for': str - word/phrase from user question,
@@ -438,7 +442,7 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
             'definition': str - definition of searched_for from key_terms (empty string if not found)
           }
         - documentation: str - combined documentation string
-          Format: "{synonym_word} is synonym with {key_term_name}" and/or
+          Format: "{synonym_word} is synonym with {key_term_name}" (one line per synonym) and/or
                   "{term_from_q} is related (similar but different) with: {rel1}, {rel2}"
           (multi-line if multiple terms, empty string if none)
         - term_substitutions: list - initialized as empty list, populated later by LLM
@@ -450,9 +454,6 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
 
     # Initialize all return values
     key_terms_found = []
-    synonym_searched_for = None  # Will be dict: {'name': str, 'exists_in_db': bool, 'definition': str}
-    synonym = None
-    synonym_exists_in_db = False
     synonym_docu = None
     related_term_searched_for = None  # Will be dict: {'name': str, 'exists_in_db': bool, 'definition': str}
     related_term_exists_in_db = False
@@ -460,6 +461,8 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
     related_terms_exists_in_db = False
     related_terms_docu = None
 
+    # Track all synonym matches (can be multiple)
+    all_synonym_matches = []
     # Track all related terms matches (can be multiple)
     all_related_matches = []
 
@@ -491,7 +494,7 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
                 if term.get('exists_in_database', False):
                     key_terms_found.append(term)
 
-    # 2. Check for synonyms
+    # 2. Check for synonyms (process ALL matches, not just first)
     for syn_word, key_term_ref in synonyms.items():
         syn_word_lower = syn_word.lower()
         found_synonym = False
@@ -524,9 +527,6 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
 
                 # Check if synonym exists in database
                 if actual_term.get('exists_in_database', False):
-                    synonym_exists_in_db = True
-                    synonym = actual_term
-
                     # Check if the synonym word itself exists in DB as a key term and get definition
                     syn_word_exists_in_db = False
                     syn_word_definition = ''
@@ -534,18 +534,18 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
                         syn_word_exists_in_db = key_terms_lookup[syn_word.lower()].get('exists_in_database', False)
                         syn_word_definition = key_terms_lookup[syn_word.lower()].get('definition', '')
 
-                    synonym_searched_for = {'name': syn_word, 'exists_in_db': syn_word_exists_in_db, 'definition': syn_word_definition}
+                    # Store this synonym match
+                    all_synonym_matches.append({
+                        'searched_for': syn_word,
+                        'maps_to': actual_term,
+                        'definition': syn_word_definition
+                    })
 
                     # Add to key_terms_found
                     if actual_term not in key_terms_found:
                         key_terms_found.append(actual_term)
 
-                    # Create synonym_docu: "<term_1> is synonym with <term_2>"
-                    # term_1 = word from user question, term_2 = synonym name that exists in DB
-                    syn_name = actual_term.get('name', '')
-                    synonym_docu = f"{syn_word} is synonym with {syn_name}"
-
-                    break  # Only process first synonym match
+                    # Continue to check other synonyms (don't break)
 
     # 3. Check for related terms (process ALL matches, not just first)
     for term_group in related_terms:
@@ -668,6 +668,14 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
                 docu_lines.append(f"{term_from_q} is related (similar but different) with: {', '.join(rel_names)}")
             related_terms_docu = '\n'.join(docu_lines)
 
+    # Build synonym documentation from all matches
+    synonym_docu_parts = []
+    for syn_match in all_synonym_matches:
+        searched_for = syn_match['searched_for']
+        maps_to_name = syn_match['maps_to'].get('name', '')
+        synonym_docu_parts.append(f"{searched_for} is synonym with {maps_to_name}")
+    synonym_docu = '\n'.join(synonym_docu_parts) if synonym_docu_parts else ''
+
     # Build documentation by combining synonym_docu and related_terms_docu
     docu_parts = []
     if synonym_docu:
@@ -679,12 +687,15 @@ def search_terms(user_question, key_terms, synonyms, related_terms):
 
     # Build simplified synonym structure
     synonym_result = None
-    if synonym_exists_in_db and synonym and synonym_searched_for:
-        synonym_result = {
-            'searched_for': synonym_searched_for['name'],
-            'maps_to': synonym,
-            'definition': synonym_searched_for.get('definition', '')
-        }
+    if all_synonym_matches:
+        if len(all_synonym_matches) == 1:
+            # Single synonym - return as single dict for backward compatibility
+            synonym_result = all_synonym_matches[0]
+        else:
+            # Multiple synonyms - return as dict with matches list
+            synonym_result = {
+                'matches': all_synonym_matches
+            }
 
     # Build simplified related_terms structure
     related_terms_result = None
