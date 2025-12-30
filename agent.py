@@ -550,10 +550,11 @@ List of highlight types:
     })
 
     # Append date ranges
-    date_ranges = get_date_ranges_for_tables(sql_query)
-    combined_explanation = llm_explanation['explanation'] + date_ranges
+    # date_ranges = get_date_ranges_for_tables(sql_query)
+    #combined_explanation = llm_explanation['explanation'] + date_ranges
 
-    return {'explanation': combined_explanation}
+    # return {'explanation': combined_explanation}
+    return {'explanation': llm_explanation['explanation']}
 
 
 # the function checks if the query output exceeds context window limit and if yes, send the query for refinement
