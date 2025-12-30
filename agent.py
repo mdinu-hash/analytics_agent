@@ -22,8 +22,6 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 import queue
-import sqlglot
-from sqlglot import parse_one
 
 # Import initialization components
 from src.init.initialization import (
@@ -467,55 +465,6 @@ def create_query_insight(sql_query:str, sql_query_result:str):
                         'sql_query_result':sql_query_result})
 
 
-def extract_tables_from_sql(sql_query: str) -> list[str]:
-    """Parse SQL to extract table names"""
-    try:
-        ast = parse_one(sql_query, dialect=sql_dialect)
-        tables = []
-        for items in ast.find_all(sqlglot.expressions.Table):
-            tables.append(items.sql())
-        return list(dict.fromkeys(tables))
-    except:
-        import re
-        tables = re.findall(r'FROM\s+(\w+)|JOIN\s+(\w+)', sql_query, re.IGNORECASE)
-        return list(set([t for group in tables for t in group if t]))
-
-
-def get_date_ranges_for_tables(sql_query: str) -> list[str]:
-    """
-    Fetch date ranges for tables used in SQL query from pre-filled database_schema.
-
-    Note: This function now reads from pre-filled date_range fields in database_schema.
-
-    Returns list of date range strings.
-    """
-    from src.init.database_schema import database_schema
-
-    tables = extract_tables_from_sql(sql_query)
-
-    if not tables:
-        return []
-
-    date_ranges = []
-
-    try:
-        # Iterate through database_schema to find matching tables
-        for table in database_schema:
-            table_name = table['table_name']
-
-            # Check if this table is in the SQL query
-            if any(table_name.lower() in t.lower() or t.lower() in table_name.lower() for t in tables):
-                # Check all columns for pre-filled date_range values
-                for column_name, column_info in table['columns'].items():
-                    date_range = column_info.get('date_range', '').strip()
-                    if date_range:
-                        date_ranges.append(f"{table_name}, column {column_name}: {date_range}")
-
-        return date_ranges
-    except Exception as e:
-        return []
-
-
 class QueryExplanation(TypedDict):
     explanation: Annotated[list[str], "2-5 concise assumptions/highlights"]
 
@@ -549,11 +498,6 @@ List of highlight types:
         'sql_query': sql_query
     })
 
-    # Append date ranges
-    # date_ranges = get_date_ranges_for_tables(sql_query)
-    #combined_explanation = llm_explanation['explanation'] + date_ranges
-
-    # return {'explanation': combined_explanation}
     return {'explanation': llm_explanation['explanation']}
 
 
