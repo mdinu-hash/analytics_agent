@@ -276,33 +276,32 @@ button[key="send_btn"]:hover {
     40% { transform: scale(1); }
 }
 
-/* Tab styling to match gradient background */
+/* Tab styling */
 .stTabs [data-baseweb="tab-list"] {
     gap: 8px;
     background: transparent;
 }
 
 .stTabs [data-baseweb="tab"] {
-    background: rgba(255, 255, 255, 0.1) !important;
-    color: #ffffff !important;
-    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    background: #f3f4f6 !important;
+    color: #374151 !important;
+    border: 1px solid #e5e7eb !important;
     border-radius: 8px !important;
     padding: 8px 16px !important;
     font-weight: 500 !important;
     font-family: 'Maven Pro', sans-serif !important;
-    backdrop-filter: blur(10px);
 }
 
 .stTabs [data-baseweb="tab"]:hover {
-    background: rgba(255, 255, 255, 0.2) !important;
-    color: #ffffff !important;
-    border-color: rgba(255, 255, 255, 0.4) !important;
+    background: #e5e7eb !important;
+    color: #1f2937 !important;
+    border-color: #d1d5db !important;
 }
 
 .stTabs [aria-selected="true"] {
-    background: rgba(255, 255, 255, 0.25) !important;
+    background: #8b5cf6 !important;
     color: #ffffff !important;
-    border-color: rgba(255, 255, 255, 0.5) !important;
+    border-color: #8b5cf6 !important;
     font-weight: 600 !important;
 }
 
@@ -478,97 +477,73 @@ st.markdown("""
 # Create tabs
 tab1, tab2 = st.tabs(["Agent Chat", "Tables"])
 
-# Sample data for tables
-def create_sample_data():
-    """Create sample data for each table"""
-    # Household table
-    household_data = pd.DataFrame({
-        'household_id': ['HH001', 'HH002', 'HH003'],
-        'household_tenure': [5, 12, 3],
-        'household_registration_type': ['Online', 'Branch', 'Online'],
-        'household_segment': ['Premium', 'Standard', 'Basic']
-    })
-    
-    # Advisor table
-    advisor_data = pd.DataFrame({
-        'advisor_id': ['ADV001', 'ADV002', 'ADV003'],
-        'business_line_name': ['Wealth Management', 'Investment Advisory', 'Private Banking'],
-        'account_type': ['Managed', 'Advisory', 'Discretionary'],
-        'account_custodian': ['Internal', 'External', 'Internal'],
-        'account_risk_profile': ['Conservative', 'Moderate', 'Aggressive']
-    })
-    
-    # Product table
-    product_data = pd.DataFrame({
-        'product_id': ['PROD001', 'PROD002', 'PROD003'],
-        'asset_category': ['Equity', 'Fixed Income', 'Alternative'],
-        'asset_subcategory': ['Large Cap', 'Government Bonds', 'Real Estate'],
-        'product_line': ['Mutual Funds', 'ETFs', 'REITs'],
-        'product_name': ['Growth Fund A', 'Treasury Bond ETF', 'Commercial REIT']
-    })
-    
-    # Fact account monthly table
-    fact_account_monthly_data = pd.DataFrame({
-        'snapshot_date': ['2024-01-01', '2024-01-01', '2024-01-01'],
-        'account_id': ['ACC001', 'ACC002', 'ACC003'],
-        'account_monthly_return': [0.05, -0.02, 0.03],
-        'account_net_flow': [10000, -5000, 7500],
-        'account_assets': [250000, 150000, 300000],
-        'advisor_id': ['ADV001', 'ADV002', 'ADV001'],
-        'household_id': ['HH001', 'HH002', 'HH003'],
-        'business_line_name': ['Wealth Management', 'Investment Advisory', 'Wealth Management']
-    })
-    
-    # Fact account product monthly table
-    fact_account_product_monthly_data = pd.DataFrame({
-        'snapshot_date': ['2024-01-01', '2024-01-01', '2024-01-01'],
-        'account_id': ['ACC001', 'ACC002', 'ACC003'],
-        'product_name': ['Growth Fund A', 'Treasury Bond ETF', 'Growth Fund A'],
-        'product_allocation_pct': [0.65, 0.40, 0.45]
-    })
-    
-    # Fact revenue monthly table
-    fact_revenue_monthly_data = pd.DataFrame({
-        'snapshot_date': ['2024-01-01', '2024-01-01', '2024-01-01'],
-        'account_id': ['ACC001', 'ACC002', 'ACC003'],
-        'advisor_id': ['ADV001', 'ADV002', 'ADV001'],
-        'household_id': ['HH001', 'HH002', 'HH003'],
-        'business_line_name': ['Wealth Management', 'Investment Advisory', 'Wealth Management'],
-        'gross_fee_amount': [2500, 1800, 3200],
-        'third_party_fee': [150, 120, 200],
-        'net_revenue': [2350, 1680, 3000]
-    })
-    
-    # Fact customer feedback table
-    fact_customer_feedback_data = pd.DataFrame({
-        'feedback_date': ['2024-01-15', '2024-01-20', '2024-01-25'],
-        'household_id': ['HH001', 'HH002', 'HH003'],
-        'advisor_id': ['ADV001', 'ADV002', 'ADV001'],
-        'feedback_text': ['Very satisfied with service', 'Could improve response time', 'Excellent portfolio performance'],
-        'satisfaction_score': [9, 6, 10]
-    })
-    
-    return {
-        'household': household_data,
-        'advisor': advisor_data,
-        'product': product_data,
-        'fact_account_monthly': fact_account_monthly_data,
-        'fact_account_product_monthly': fact_account_product_monthly_data,
-        'fact_revenue_monthly': fact_revenue_monthly_data,
-        'fact_customer_feedback': fact_customer_feedback_data
-    }
+# Fetch table data from database
+def get_table_data_from_db():
+    """Fetch actual data from database tables"""
+    from src.init.init_demo_database.demo_database_util import execute_query
+
+    tables_data = {}
+    tables_to_show = ['account', 'advisors', 'household', 'fact_account_monthly']
+
+    try:
+        for table_name in tables_to_show:
+            # Get first 10 rows from each table
+            query = f"SELECT * FROM {table_name} LIMIT 10"
+            result = execute_query(query, agent.connection_string)
+
+            if result and len(result) > 0:
+                # Convert to DataFrame
+                df = pd.DataFrame(result)
+                tables_data[table_name] = df
+    except Exception as e:
+        st.error(f"Error loading table data: {e}")
+
+    return tables_data
+
+def get_table_counts():
+    """Get record counts for each table"""
+    from src.init.init_demo_database.demo_database_util import execute_query
+
+    counts = {}
+    tables_to_show = ['account', 'advisors', 'household', 'fact_account_monthly']
+
+    try:
+        for table_name in tables_to_show:
+            query = f"SELECT COUNT(*) as count FROM {table_name}"
+            result = execute_query(query, agent.connection_string)
+
+            if result and len(result) > 0:
+                counts[table_name] = result[0]['count']
+            else:
+                counts[table_name] = 0
+    except Exception as e:
+        st.error(f"Error getting table counts: {e}")
+        counts = {table: 0 for table in tables_to_show}
+
+    return counts
 
 with tab2:
     st.markdown("### Database Tables Overview")
-    st.markdown("Here are the tables available to the Analytics Agent with sample data:")
-    
-    sample_data = create_sample_data()
-    
+
+    # Get table counts and data
+    table_counts = get_table_counts()
+    tables_data = get_table_data_from_db()
+
+    # Define display order and formatting
+    table_display_config = {
+        'account': 'Account',
+        'advisors': 'Advisors',
+        'household': 'Household',
+        'fact_account_monthly': 'Fact Account Monthly: Monthly account performance and asset data'
+    }
+
     # Display each table
-    for table_name, data in sample_data.items():
-        st.markdown(f"#### {table_name.replace('_', ' ').title()}")
-        st.dataframe(data, use_container_width=True)
-        st.markdown("---")
+    for table_key, display_name in table_display_config.items():
+        if table_key in tables_data:
+            count = table_counts.get(table_key, 0)
+            st.markdown(f"#### {display_name}: {count:,} entries")
+            st.dataframe(tables_data[table_key], use_container_width=True)
+            st.markdown("---")
 
 with tab1:
     # Add some spacing before Clear & New Chat button
