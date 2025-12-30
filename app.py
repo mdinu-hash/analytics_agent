@@ -12,7 +12,9 @@ import pandas as pd
 # Configure page without sidebar
 st.set_page_config(
     page_title="Analytics Agent",
-    layout="wide"
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 # Add the current directory to Python path to ensure imports work
@@ -48,14 +50,6 @@ if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid.uuid4())
 if "show_welcome" not in st.session_state:
     st.session_state.show_welcome = True
-
-# Configure Streamlit page
-st.set_page_config(
-    page_title="Analytics Agent", 
-    page_icon="🤖", 
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # Custom CSS matching the UI specs - Databricks compatible
 st.markdown("""
@@ -480,21 +474,33 @@ tab1, tab2 = st.tabs(["Agent Chat", "Tables"])
 # Fetch table data from database
 def get_table_data_from_db():
     """Fetch actual data from database tables"""
-    from src.init.init_demo_database.demo_database_util import execute_query
+    import psycopg2
 
     tables_data = {}
     tables_to_show = ['account', 'advisors', 'household', 'fact_account_monthly']
 
     try:
-        for table_name in tables_to_show:
-            # Get first 10 rows from each table
-            query = f"SELECT * FROM {table_name} LIMIT 10"
-            result = execute_query(query, agent.connection_string)
+        conn = psycopg2.connect(agent.connection_string)
+        cursor = conn.cursor()
 
-            if result and len(result) > 0:
-                # Convert to DataFrame
-                df = pd.DataFrame(result)
+        for table_name in tables_to_show:
+            # Get first 3 rows from each table
+            query = f"SELECT * FROM {table_name} LIMIT 3"
+            cursor.execute(query)
+
+            # Get column names from cursor
+            columns = [desc[0] for desc in cursor.description]
+
+            # Fetch results
+            results = cursor.fetchall()
+
+            if results:
+                # Convert to DataFrame with proper column names
+                df = pd.DataFrame(results, columns=columns)
                 tables_data[table_name] = df
+
+        cursor.close()
+        conn.close()
     except Exception as e:
         st.error(f"Error loading table data: {e}")
 
@@ -502,20 +508,27 @@ def get_table_data_from_db():
 
 def get_table_counts():
     """Get record counts for each table"""
-    from src.init.init_demo_database.demo_database_util import execute_query
+    import psycopg2
 
     counts = {}
     tables_to_show = ['account', 'advisors', 'household', 'fact_account_monthly']
 
     try:
-        for table_name in tables_to_show:
-            query = f"SELECT COUNT(*) as count FROM {table_name}"
-            result = execute_query(query, agent.connection_string)
+        conn = psycopg2.connect(agent.connection_string)
+        cursor = conn.cursor()
 
-            if result and len(result) > 0:
-                counts[table_name] = result[0]['count']
+        for table_name in tables_to_show:
+            query = f"SELECT COUNT(*) FROM {table_name}"
+            cursor.execute(query)
+            result = cursor.fetchone()
+
+            if result:
+                counts[table_name] = result[0]
             else:
                 counts[table_name] = 0
+
+        cursor.close()
+        conn.close()
     except Exception as e:
         st.error(f"Error getting table counts: {e}")
         counts = {table: 0 for table in tables_to_show}
@@ -720,14 +733,11 @@ with tab1:
         if "selected_prompt" not in st.session_state:
             st.session_state.selected_prompt = ""
         
-        # Example prompt buttons for functionality - 3 prompts stacked vertically and centered
+        # Example prompt buttons for functionality - 1 prompt stacked vertically and centered
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("Which household segment is responsible for most revenue?", key="btn1", help="Click to use this prompt", use_container_width=True):
-                st.session_state.selected_prompt = "Which household segment is responsible for most revenue?"
-                st.rerun()
-            if st.button("For advisor ID 8, show their product usage status, total assets and payout.", key="btn2", help="Click to use this prompt", use_container_width=True):
-                st.session_state.selected_prompt = "For advisor ID 8, show their product usage status, total assets and payout."
+            if st.button("Which practice segment has the highest asset growth rate (%) in last 12 months?", key="btn1", help="Click to use this prompt", use_container_width=True):
+                st.session_state.selected_prompt = "Which practice segment has the highest asset growth rate (%) in last 12 months?"
                 st.rerun()
 
     # Define callback function for immediate welcome screen hiding
