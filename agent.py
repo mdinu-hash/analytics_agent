@@ -506,8 +506,6 @@ def execute_sql_query(state:State):
          state['current_sql_queries'][query_index]['insight'] = analysis['insight']
          state['current_sql_queries'][query_index]['query'] = sql_query
 
-         # Key assumptions will be generated in add_assumptions node
-
          break
 
        # if the sql query exceeds output context window and there is more room for iterations, refine the query
@@ -526,7 +524,6 @@ def execute_sql_query(state:State):
        # if there is no more room for sql query iterations and the result still exceeds context window, throw a message
        else:
         state['current_sql_queries'][query_index]['result'] = 'Query result too large after 3 refinements.'
-        # Key assumptions will be generated in add_assumptions node
         break
 
   # Add routing to generate_answer (skip second orchestrator call)
@@ -813,7 +810,7 @@ def generate_answer(state:State):
   # invoke parameters based on scenario
   invoke_params = next(s['Invoke_Params'](state) for s in scenario_prompts if s['Type'] == scenario)
 
-  # Generate LLM response (key assumptions will be added in add_assumptions node)
+  # Generate LLM response 
   ai_msg = llm_answer_chain.invoke(invoke_params)
 
   # Update state (common for all scenarios)
@@ -1102,10 +1099,16 @@ def add_assumptions(state:State):
           updated_content = current_content + key_assumptions_section
 
           # Create new AIMessage with updated content
-          state['llm_answer'] = AIMessage(
+          updated_message = AIMessage(
               content=updated_content,
               response_metadata=state['llm_answer'].response_metadata
           )
+          state['llm_answer'] = updated_message
+
+          # Update the last message in messages_log (which was added in generate_answer)
+          # Replace it with the updated message that includes key assumptions
+          if state['messages_log'] and isinstance(state['messages_log'][-1], AIMessage):
+              state['messages_log'][-1] = updated_message
 
   # No routing needed - this always goes to END
   # manage_memory_chat_history will be called by run_control_flow after this node

@@ -733,11 +733,19 @@ with tab1:
         if "selected_prompt" not in st.session_state:
             st.session_state.selected_prompt = ""
         
-        # Example prompt buttons for functionality - 1 prompt stacked vertically and centered
+        # Example prompt buttons for functionality - 3 prompts stacked vertically and centered
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             if st.button("Which practice segment has the highest asset growth rate (%) in last 12 months?", key="btn1", help="Click to use this prompt", use_container_width=True):
                 st.session_state.selected_prompt = "Which practice segment has the highest asset growth rate (%) in last 12 months?"
+                st.rerun()
+
+            if st.button("Which segment has more room to grow?", key="btn2", help="Click to use this prompt", use_container_width=True):
+                st.session_state.selected_prompt = "Which segment has more room to grow?"
+                st.rerun()
+
+            if st.button("Which households have the higher pay grade?", key="btn3", help="Click to use this prompt", use_container_width=True):
+                st.session_state.selected_prompt = "Which households have the higher pay grade?"
                 st.rerun()
 
     # Define callback function for immediate welcome screen hiding
