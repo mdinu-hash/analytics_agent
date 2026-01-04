@@ -526,7 +526,7 @@ def execute_sql_query(state:State):
         state['current_sql_queries'][query_index]['result'] = 'Query result too large after 3 refinements.'
         break
 
-  # Add routing to generate_answer (skip second orchestrator call)
+  # Add routing to generate_answer 
   action = AgentAction(tool='execute_sql_query', tool_input='', log='tool ran successfully')
   state['intermediate_steps'].append(action)
   state['intermediate_steps'].append(AgentAction(tool='generate_answer', tool_input='', log=''))
@@ -813,67 +813,50 @@ def generate_answer(state:State):
   # Generate LLM response 
   ai_msg = llm_answer_chain.invoke(invoke_params)
 
-  # Update state (common for all scenarios)
+  # Update state with response, and the messages log with current question and AI response.
   state['llm_answer'] = ai_msg
   state['messages_log'].append(HumanMessage(state['current_question']))
-  state['messages_log'].append(ai_msg) 
+  state['messages_log'].append(ai_msg)
+
+  # log generate answer run
+  action = AgentAction(tool='generate_answer', tool_input='', log = 'tool ran successfully')
+  state['intermediate_steps'].append(action)
+
+  # control flow - route based on scenario
+  if scenario == 'A':
+      # Scenario A needs key assumptions added
+      next_tool_name = 'add_assumptions'
+  else:
+      # Scenarios B, C, D - check if memory management needed
+      tokens_chat_history = calculate_chat_history_tokens(state['messages_log'])
+      if tokens_chat_history >= 1000 and len(state['messages_log']) > 4:
+          next_tool_name = 'manage_memory_chat_history'
+      else:
+          next_tool_name = END
+
+  action = AgentAction( tool=next_tool_name, tool_input='', log = '' )
+  state['intermediate_steps'].append(action)
 
   return state
 
+@tool
 def manage_memory_chat_history(state:State):
     """ Manages the chat history so that it does not become too large in terms of output tokens.
-    Specifically, it checks if the chat history is larger than 1000 tokens. If yes, keep just the last 4 pairs of human prompts and AI responses, and summarize the older messages.
-    Additionally, check if the logs of sql queries is larger than 20 entries. If yes, delete the older records. """           
+    Summarizes older messages and keeps just the last 4 pairs of human prompts and AI responses. """
 
-    tokens_chat_history = calculate_chat_history_tokens(state['messages_log'])    
+    # Summarize older messages and keep last 4
+    message_history_to_summarize = [msg.content for msg in state['messages_log'][:-4]]
+    prompt = create_prompt_template('user', 'Distill the below chat messages into a single summary paragraph.The summary paragraph should have maximum 400 tokens.Include as many specific details as you can.Chat messages:{message_history_to_summarize}')
+    runnable = prompt | llm_fast # use the cheap model
+    chat_history_summary = runnable.invoke({'message_history_to_summarize':message_history_to_summarize})
+    last_4_messages = state['messages_log'][-4:]
+    state['messages_log'] = [chat_history_summary] +[*last_4_messages]
 
-    if tokens_chat_history >= 1000 and len(state['messages_log']) > 4:
-        message_history_to_summarize = [msg.content for msg in state['messages_log'][:-4]]
-        prompt = create_prompt_template('user', 'Distill the below chat messages into a single summary paragraph.The summary paragraph should have maximum 400 tokens.Include as many specific details as you can.Chat messages:{message_history_to_summarize}')
-        runnable = prompt | llm_fast # use the cheap model
-        chat_history_summary = runnable.invoke({'message_history_to_summarize':message_history_to_summarize})
-        last_4_messages = state['messages_log'][-4:]
-        state['messages_log'] = [chat_history_summary] +[*last_4_messages]
-    else:
-        state['messages_log'] = state['messages_log']  
-        
+    # log manage_memory_chat_history run
+    action = AgentAction(tool='manage_memory_chat_history', tool_input='', log = 'tool ran successfully')
+    state['intermediate_steps'].append(action)
+
     return state
-
-def retrieve_scratchpad(state:State):
- ''' retrieves the number of executions for important tools or functions (from intermediate steps) executed by the agent ''' 
- nr_executions_orchestrator= 0
- nr_executions_extract_analytical_intent = 0
- nr_executions_create_sql_query_or_queries = 0
- 
- for index,action in enumerate(state['intermediate_steps']):
-      
-  if action.tool == 'extract_analytical_intent' and action.log == 'tool ran successfully':
-      nr_executions_extract_analytical_intent +=1
-
-  if action.tool == 'create_sql_query_or_queries' and action.log == 'tool ran successfully':
-      nr_executions_create_sql_query_or_queries +=1
-
-  if action.tool == 'orchestrator' and action.log == 'tool ran successfully':
-     nr_executions_orchestrator +=1    
-
- output = {'nr_executions_orchestrator':nr_executions_orchestrator,
-           'nr_executions_extract_analytical_intent':nr_executions_extract_analytical_intent,
-           'nr_executions_create_sql_query_or_queries':nr_executions_create_sql_query_or_queries}   
- return output 
-  
-def get_next_tool(state:State):
-  ''' creates a list of actions taken by the agent from the scratchpad '''
-  scratchpad = retrieve_scratchpad(state)
-  nr_executions_extract_analytical_intent = scratchpad['nr_executions_extract_analytical_intent']
-  nr_executions_create_sql_query_or_queries = scratchpad['nr_executions_create_sql_query_or_queries']
-
-  # First time: route to clarification_check 
-  if nr_executions_extract_analytical_intent == 0:
-    next_tool = 'clarification_check'
-  elif nr_executions_create_sql_query_or_queries == nr_executions_extract_analytical_intent == 1:
-    next_tool = 'generate_answer'
-
-  return next_tool
 
 class ScenarioBC(TypedDict):
   ''' indication of the next step to be performed by the agent '''
@@ -1069,61 +1052,59 @@ def clarification(state:State):
 
   return state
 
+@tool
 def add_assumptions(state:State):
-  ''' Generates key assumptions and appends them to the answer for transparency '''
+  ''' Generates key assumptions and appends them to the answer for transparency (only called for scenario A) '''
 
-  # Only generate and append assumptions for scenario A
-  if state.get('scenario') == 'A':
-      key_assumptions = []
+  key_assumptions = []
 
-      # Generate query explanations for each executed query
-      for query_data in state['current_sql_queries']:
-          if query_data.get('query'):
-              explanation = create_query_explanation(query_data['query'])
-              if explanation.get('explanation') and isinstance(explanation['explanation'], list):
-                  key_assumptions.extend(explanation['explanation'])
+  # Generate query explanations for each executed query
+  for query_data in state['current_sql_queries']:
+      if query_data.get('query'):
+          explanation = create_query_explanation(query_data['query'])
+          if explanation.get('explanation') and isinstance(explanation['explanation'], list):
+              key_assumptions.extend(explanation['explanation'])
 
-      # Add key assumptions from term substitutions
-      assumptions_output = add_key_assumptions_from_term_substitutions(state['search_terms_output'])
-      if assumptions_output.get('key_assumptions'):
-          key_assumptions.extend(assumptions_output['key_assumptions'])
+  # Add key assumptions from term substitutions
+  assumptions_output = add_key_assumptions_from_term_substitutions(state['search_terms_output'])
+  if assumptions_output.get('key_assumptions'):
+      key_assumptions.extend(assumptions_output['key_assumptions'])
 
-      # Store in state
-      state['generate_answer_details']['key_assumptions'] = key_assumptions
+  # Store in state
+  state['generate_answer_details']['key_assumptions'] = key_assumptions
 
-      # Format and append to llm_answer
-      key_assumptions_section = format_key_assumptions_for_prompt(key_assumptions)
+  # Format and append to llm_answer
+  key_assumptions_section = format_key_assumptions_for_prompt(key_assumptions)
 
-      if key_assumptions_section:
-          current_content = state['llm_answer'].content
-          updated_content = current_content + key_assumptions_section
+  if key_assumptions_section:
+      current_content = state['llm_answer'].content
+      content_key_assumptions = current_content + key_assumptions_section
 
-          # Create new AIMessage with updated content
-          updated_message = AIMessage(
-              content=updated_content,
-              response_metadata=state['llm_answer'].response_metadata
-          )
-          state['llm_answer'] = updated_message
+      # Replace llm_answer with updated answer, as well as the AI answer in the messages log
+      ai_msg = AIMessage(content=content_key_assumptions)
+      state['llm_answer'] = ai_msg
+      state['messages_log'][-1] = ai_msg
 
-          # Update the last message in messages_log (which was added in generate_answer)
-          # Replace it with the updated message that includes key assumptions
-          if state['messages_log'] and isinstance(state['messages_log'][-1], AIMessage):
-              state['messages_log'][-1] = updated_message
+  # log add assumptions run
+  action = AgentAction(tool='add_assumptions', tool_input='', log = 'tool ran successfully')
+  state['intermediate_steps'].append(action)
 
-  # No routing needed - this always goes to END
-  # manage_memory_chat_history will be called by run_control_flow after this node
+  # control flow - check if memory management needed
+  tokens_chat_history = calculate_chat_history_tokens(state['messages_log'])
+  if tokens_chat_history >= 1000 and len(state['messages_log']) > 4:
+      next_tool_name = 'manage_memory_chat_history'
+  else:
+      next_tool_name = END
+
+  action = AgentAction( tool=next_tool_name, tool_input='', log = '' )
+  state['intermediate_steps'].append(action)
 
   return state
 
 def orchestrator(state:State):
-  ''' Function that decides which tools to use '''
+  ''' Orchestrator deciding if the user question requires querying the database or is asking for info not available '''
 
-  scratchpad = retrieve_scratchpad(state)
-  nr_executions_orchestrator = scratchpad['nr_executions_orchestrator']
-
-  # if this is the 1st time when orchestrator is called, check scenarios B or C to decide whether you call directly generate_answer.  
-  if nr_executions_orchestrator == 0:
-    system_prompt = f"""You are a decision support consultant helping users make data-driven decisions.
+  system_prompt = f"""You are a decision support consultant helping users make data-driven decisions.
 
     Your task is to decide the next action for this question: {{question}}.
 
@@ -1142,40 +1123,30 @@ def orchestrator(state:State):
     
     Step 3. Otherwise → "Continue".
     """
-    prompt = create_prompt_template('system', system_prompt)
-    chain = prompt | llm_fast.with_structured_output(ScenarioBC)
-    result = chain.invoke({'messages_log':extract_msg_content_from_history(state['messages_log']),
+  prompt = create_prompt_template('system', system_prompt)
+  chain = prompt | llm_fast.with_structured_output(ScenarioBC)
+  result = chain.invoke({'messages_log':extract_msg_content_from_history(state['messages_log']),
                          'question': state['current_question'], 
                          'insights': format_sql_query_results_for_prompt(state['current_sql_queries']),
                          'objects_documentation':state['objects_documentation']
                          })   
-    if result['next_step'] == 'Continue':
-      scenario = ''  # empty string
-      agent_questions = None
-      next_tool_name = get_next_tool(state)
-      pass
+  if result['next_step'] == 'Continue':
+    scenario = ''  
+    agent_questions = None
+    next_tool_name = 'clarification_check'
+    pass
 
-    # if scenario B, set the scenario in the state and log the generate_answer as next step
-    elif result['next_step'] == 'B':
-      scenario = result['next_step']
-      agent_questions = None
-      next_tool_name = 'generate_answer'
+  # if scenario B, set the scenario in the state and log the generate_answer as next step
+  elif result['next_step'] == 'B':
+    scenario = result['next_step']
+    agent_questions = None
+    next_tool_name = 'generate_answer'
 
-    # if scenario C, set the scenario in the state and log the generate_answer as next step
-    else:
-      scenario = result['next_step']
-      agent_questions = None
-      next_tool_name = 'generate_answer'
-
-  # if this is not the 1st time when orchestrator runs
+  # if scenario C, set the scenario in the state and log the generate_answer as next step
   else:
-
-    # go directly to answer because analytical intent has been extracted, queries created and executed
-    next_tool = get_next_tool(state)
-    if next_tool == 'generate_answer':
-       next_tool_name = 'generate_answer'
-       scenario = 'A' # can be changed later for the situation when insights are not enough and a subsequent analysis is needed
-       agent_questions = None
+    scenario = result['next_step']
+    agent_questions = None
+    next_tool_name = 'generate_answer'
 
   # update state
   state['scenario'] = scenario
@@ -1183,9 +1154,9 @@ def orchestrator(state:State):
 
   # log orchestrator run
   action = AgentAction(tool='orchestrator', tool_input='', log = 'tool ran successfully')
-  state['intermediate_steps'].append(action)     
+  state['intermediate_steps'].append(action)  
 
-  # log next tool to call
+  # control flow
   action = AgentAction( tool=next_tool_name, tool_input='', log = '' )
   state['intermediate_steps'].append(action)  
   return state     
@@ -1222,10 +1193,13 @@ def run_control_flow(state:State):
     elif tool_name == 'generate_answer':
       state = generate_answer.invoke({'state':state})
 
-    # add assumptions and manage chat history
+    # add assumptions
     elif tool_name == 'add_assumptions':
-      state = add_assumptions(state)
-      state = manage_memory_chat_history(state)
+      state = add_assumptions.invoke({'state':state})
+
+    # manage memory chat history
+    elif tool_name == 'manage_memory_chat_history':
+      state = manage_memory_chat_history.invoke({'state':state})
 
     return state
   
@@ -1295,13 +1269,14 @@ def router(state:State):
 graph= StateGraph(State)
 graph.add_node("reset_state",reset_state)
 graph.add_node("orchestrator",orchestrator)
-graph.add_node("clarification_check",run_control_flow)  
+graph.add_node("clarification_check",run_control_flow)
 graph.add_node("extract_analytical_intent",run_control_flow)
-graph.add_node("clarification",run_control_flow)  
+graph.add_node("clarification",run_control_flow)
 graph.add_node("create_sql_query_or_queries",run_control_flow)
-graph.add_node("execute_sql_query",run_control_flow)  
+graph.add_node("execute_sql_query",run_control_flow)
 graph.add_node("generate_answer",run_control_flow)
-graph.add_node("add_assumptions",run_control_flow) 
+graph.add_node("add_assumptions",run_control_flow)
+graph.add_node("manage_memory_chat_history",run_control_flow)  # NEW
 
 # Starting the agent
 graph.add_edge(START,"reset_state")
@@ -1319,17 +1294,20 @@ graph.add_conditional_edges(source='extract_analytical_intent',path=router)
 # Create_sql_query_or_queries routes to execute_sql_query
 graph.add_edge("create_sql_query_or_queries","execute_sql_query")
 
-# Execute_sql_query routes to generate_answer (skip orchestrator 2nd call)
+# Execute_sql_query routes to generate_answer
 graph.add_conditional_edges(source='execute_sql_query',path=router)
 
 # Clarification routes to generate_answer
 graph.add_edge("clarification","generate_answer")
 
-# Generate_answer routes to add_assumptions
-graph.add_edge("generate_answer","add_assumptions")
+# Generate_answer routes conditionally: scenario A → add_assumptions, else → manage_memory_chat_history
+graph.add_conditional_edges(source='generate_answer',path=router)
 
-# Add_assumptions is the final node
-graph.add_edge("add_assumptions",END)
+# Add_assumptions routes to manage_memory_chat_history
+graph.add_conditional_edges(source='add_assumptions',path=router)
+
+# Manage_memory_chat_history is the final node
+graph.add_edge("manage_memory_chat_history",END)
 
 memory = MemorySaver()
 graph = graph.compile(checkpointer=memory)
