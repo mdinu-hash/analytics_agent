@@ -539,229 +539,229 @@ database_schema = [
         }
     },
 
-    {
-        'table_name': 'public.fact_account_product_monthly',
-        'table_description': 'Monthly asset allocation by product for each account',
-        'columns': {
-            'snapshot_date': {
-                'description': 'End-of-month date for the allocation snapshot',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': "SELECT distinct concat ('product account dates between ',min(snapshot_date),' and ', max(snapshot_date) ) FROM fact_account_product_monthly",
-                'column_values': '',
-                'date_range': ''
-            },
-            'account_key': {
-                'description': 'Foreign key to account table',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'product_id': {
-                'description': 'Foreign key to product table',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'product_allocation_pct': {
-                'description': 'Percentage of account allocated to this product. Non-additive measure.',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            }
-        }
-    },
+    # {
+    #     'table_name': 'public.fact_account_product_monthly',
+    #     'table_description': 'Monthly asset allocation by product for each account',
+    #     'columns': {
+    #         'snapshot_date': {
+    #             'description': 'End-of-month date for the allocation snapshot',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': "SELECT distinct concat ('product account dates between ',min(snapshot_date),' and ', max(snapshot_date) ) FROM fact_account_product_monthly",
+    #             'column_values': '',
+    #             'date_range': ''
+    #         },
+    #         'account_key': {
+    #             'description': 'Foreign key to account table',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'product_id': {
+    #             'description': 'Foreign key to product table',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'product_allocation_pct': {
+    #             'description': 'Percentage of account allocated to this product. Non-additive measure.',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         }
+    #     }
+    # },
 
-    {
-        'table_name': 'public.fact_household_monthly',
-        'table_description': 'Monthly aggregated household data. This table aggregates fact_account_monthly at household level.',
-        'columns': {
-            'snapshot_date': {
-                'description': 'End-of-month date for the data snapshot',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': "SELECT distinct concat ('household dates between ',min(snapshot_date),' and ', max(snapshot_date) ) FROM fact_household_monthly",
-                'column_values': '',
-                'date_range': ''
-            },
-            'household_key': {
-                'description': 'Foreign key to household table',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'household_assets': {
-                'description': 'Total assets across all household accounts. Aggregation over table fact_account_monthly -> column account_assets. Semi-additive measure.',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'asset_range_bucket': {
-                'description': 'Categorized asset range for segmentation',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '$0 – $100k | $100k – $250k | $1M – $5M | $250k – $500k | $500k – $1M',
-            'date_range': ''
-            },
-            'high_net_worth_flag': {
-                'description': 'Boolean indicator for high-net-worth status',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'household_net_flow': {
-                'description': 'Net deposits/withdrawals across all accounts. Aggregation of table fact_account_monthly -> column account_net_flow. Additive measure.',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            }
-        }
-    },
+    # {
+    #     'table_name': 'public.fact_household_monthly',
+    #     'table_description': 'Monthly aggregated household data. This table aggregates fact_account_monthly at household level.',
+    #     'columns': {
+    #         'snapshot_date': {
+    #             'description': 'End-of-month date for the data snapshot',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': "SELECT distinct concat ('household dates between ',min(snapshot_date),' and ', max(snapshot_date) ) FROM fact_household_monthly",
+    #             'column_values': '',
+    #             'date_range': ''
+    #         },
+    #         'household_key': {
+    #             'description': 'Foreign key to household table',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'household_assets': {
+    #             'description': 'Total assets across all household accounts. Aggregation over table fact_account_monthly -> column account_assets. Semi-additive measure.',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'asset_range_bucket': {
+    #             'description': 'Categorized asset range for segmentation',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '$0 – $100k | $100k – $250k | $1M – $5M | $250k – $500k | $500k – $1M',
+    #         'date_range': ''
+    #         },
+    #         'high_net_worth_flag': {
+    #             'description': 'Boolean indicator for high-net-worth status',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'household_net_flow': {
+    #             'description': 'Net deposits/withdrawals across all accounts. Aggregation of table fact_account_monthly -> column account_net_flow. Additive measure.',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         }
+    #     }
+    # },
 
-    {
-        'table_name': 'public.fact_revenue_monthly',
-        'table_description': 'Monthly fee and revenue calculations',
-        'columns': {
-            'snapshot_date': {
-                'description': 'End-of-month date for revenue calculation',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': "SELECT distinct concat ('revenue dates between ',min(snapshot_date),' and ', max(snapshot_date) ) FROM fact_revenue_monthly",
-                'column_values': '',
-                'date_range': ''
-            },
-            'account_key': {
-                'description': 'Foreign key to account table',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'advisor_key': {
-                'description': 'Foreign key to advisors table',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'household_key': {
-                'description': 'Foreign key to household table',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'business_line_key': {
-                'description': 'Foreign key to business_line table',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'account_assets': {
-                'description': 'Asset value used for fee calculation. Semi-additive measure.',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'fee_percentage': {
-                'description': 'Annual fee rate applied to assets. Non-additive measure.',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'gross_fee_amount': {
-                'description': 'Total fee charged before deductions. Equals to account_assets x fee_percentage. Additive measure.',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'third_party_fee': {
-                'description': 'Fees paid to external parties. Additive measure.',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'advisor_payout_rate': {
-                'description': 'Percentage of net revenue paid to advisor. Source is table advisor_payout_rate -> column advisor_payout_rate. Non-additive measure.',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'advisor_payout_amount': {
-                'description': 'Dollar amount paid to advisor. Equals to (gross_fee_amount - third_party_fee) x advisor_payout_rate. Additive measure.',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'net_revenue': {
-                'description': 'Revenue retained by Capital Partners. Equals to gross_fee_amount - third_party_fee - advisor_payout_amount. Additive measure.',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            }
-        }
-    },
+    # {
+    #     'table_name': 'public.fact_revenue_monthly',
+    #     'table_description': 'Monthly fee and revenue calculations',
+    #     'columns': {
+    #         'snapshot_date': {
+    #             'description': 'End-of-month date for revenue calculation',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': "SELECT distinct concat ('revenue dates between ',min(snapshot_date),' and ', max(snapshot_date) ) FROM fact_revenue_monthly",
+    #             'column_values': '',
+    #             'date_range': ''
+    #         },
+    #         'account_key': {
+    #             'description': 'Foreign key to account table',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'advisor_key': {
+    #             'description': 'Foreign key to advisors table',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'household_key': {
+    #             'description': 'Foreign key to household table',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'business_line_key': {
+    #             'description': 'Foreign key to business_line table',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'account_assets': {
+    #             'description': 'Asset value used for fee calculation. Semi-additive measure.',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'fee_percentage': {
+    #             'description': 'Annual fee rate applied to assets. Non-additive measure.',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'gross_fee_amount': {
+    #             'description': 'Total fee charged before deductions. Equals to account_assets x fee_percentage. Additive measure.',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'third_party_fee': {
+    #             'description': 'Fees paid to external parties. Additive measure.',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'advisor_payout_rate': {
+    #             'description': 'Percentage of net revenue paid to advisor. Source is table advisor_payout_rate -> column advisor_payout_rate. Non-additive measure.',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'advisor_payout_amount': {
+    #             'description': 'Dollar amount paid to advisor. Equals to (gross_fee_amount - third_party_fee) x advisor_payout_rate. Additive measure.',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'net_revenue': {
+    #             'description': 'Revenue retained by Capital Partners. Equals to gross_fee_amount - third_party_fee - advisor_payout_amount. Additive measure.',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         }
+    #     }
+    # },
 
-    {
-        'table_name': 'public.fact_customer_feedback',
-        'table_description': 'Client satisfaction and feedback data',
-        'columns': {
-            'feedback_id': {
-                'description': 'Unique feedback record identifier (PRIMARY KEY)',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'feedback_date': {
-                'description': 'Date feedback was collected',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': "SELECT distinct concat ('feedback dates between ',min(feedback_date),' and ', max(feedback_date) ) FROM fact_customer_feedback",
-                'column_values': '',
-                'date_range': ''
-            },
-            'household_key': {
-                'description': 'Foreign key to household table',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'advisor_key': {
-                'description': 'Foreign key to advisors table',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'feedback_text': {
-                'description': 'Customer comments (max 200 characters)',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            },
-            'satisfaction_score': {
-                'description': 'Numeric satisfaction rating (0-100). Non-additive measure.',
-                'query_to_get_column_values': '',
-                'query_to_get_date_range': '',
-            'column_values': '',
-            'date_range': ''
-            }
-        }
-    }
+    # {
+    #     'table_name': 'public.fact_customer_feedback',
+    #     'table_description': 'Client satisfaction and feedback data',
+    #     'columns': {
+    #         'feedback_id': {
+    #             'description': 'Unique feedback record identifier (PRIMARY KEY)',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'feedback_date': {
+    #             'description': 'Date feedback was collected',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': "SELECT distinct concat ('feedback dates between ',min(feedback_date),' and ', max(feedback_date) ) FROM fact_customer_feedback",
+    #             'column_values': '',
+    #             'date_range': ''
+    #         },
+    #         'household_key': {
+    #             'description': 'Foreign key to household table',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'advisor_key': {
+    #             'description': 'Foreign key to advisors table',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'feedback_text': {
+    #             'description': 'Customer comments (max 200 characters)',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         },
+    #         'satisfaction_score': {
+    #             'description': 'Numeric satisfaction rating (0-100). Non-additive measure.',
+    #             'query_to_get_column_values': '',
+    #             'query_to_get_date_range': '',
+    #         'column_values': '',
+    #         'date_range': ''
+    #         }
+    #     }
+    # }
 ]
 
 # Table relationships: respect the naming convention of schema_name.table_name.column_name. this structure is used for parsing
@@ -782,10 +782,10 @@ table_relationships = [
         'key1': 'public.fact_account_monthly.account_key',
         'key2': 'public.account.account_key'
     },
-    {
-        'key1': 'public.fact_revenue_monthly.account_key',
-        'key2': 'public.account.account_key'
-    },
+    # {
+    #     'key1': 'public.fact_revenue_monthly.account_key',
+    #     'key2': 'public.account.account_key'
+    # },
     {
         'key1': 'public.transactions.product_id',
         'key2': 'public.product.product_id'
@@ -794,24 +794,24 @@ table_relationships = [
         'key1': 'public.fact_account_monthly.snapshot_date',
         'key2': 'public.date.calendar_day'
     },
-    {
-        'key1': 'public.fact_account_product_monthly.snapshot_date',
-        'key2': 'public.date.calendar_day'
-    },
-    {
-        'key1': 'public.fact_household_monthly.snapshot_date',
-        'key2': 'public.date.calendar_day'
-    },
-    {
-        'key1': 'public.fact_revenue_monthly.snapshot_date',
-        'key2': 'public.date.calendar_day'
-    },
+    # {
+    #     'key1': 'public.fact_account_product_monthly.snapshot_date',
+    #     'key2': 'public.date.calendar_day'
+    # },
+    # {
+    #     'key1': 'public.fact_household_monthly.snapshot_date',
+    #     'key2': 'public.date.calendar_day'
+    # },
+    # {
+    #     'key1': 'public.fact_revenue_monthly.snapshot_date',
+    #     'key2': 'public.date.calendar_day'
+    # },
     {
         'key1': 'public.transactions.transaction_date',
         'key2': 'public.date.calendar_day'
     },
-    {
-        'key1': 'public.fact_customer_feedback.feedback_date',
-        'key2': 'public.date.calendar_day'
-    }
+    # {
+    #     'key1': 'public.fact_customer_feedback.feedback_date',
+    #     'key2': 'public.date.calendar_day'
+    # }
 ]

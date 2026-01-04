@@ -27,26 +27,26 @@ class TierFeeDataGenerator:
         # Tier fee structure from schema (in basis points converted to decimal)
         self.tier_fees_by_business_line = {
             'Managed Portfolio': [
-                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_pct': 1},        # 1%
-                {'tier_min_aum': 1000000, 'tier_max_aum': 5000000, 'tier_fee_pct': 1},   # 1%
-                {'tier_min_aum': 5000000, 'tier_max_aum': 999999999999, 'tier_fee_pct': 1}  # 1%
+                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_bps': 1},        # 1%
+                {'tier_min_aum': 1000000, 'tier_max_aum': 5000000, 'tier_fee_bps': 1},   # 1%
+                {'tier_min_aum': 5000000, 'tier_max_aum': 999999999999, 'tier_fee_bps': 1}  # 1%
             ],
             'Separately Managed Account': [
-                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_pct': 1},        # 1%
-                {'tier_min_aum': 1000000, 'tier_max_aum': 5000000, 'tier_fee_pct': 1},   # 1%
-                {'tier_min_aum': 5000000, 'tier_max_aum': 999999999999, 'tier_fee_pct': 1}  # 1%
+                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_bps': 1},        # 1%
+                {'tier_min_aum': 1000000, 'tier_max_aum': 5000000, 'tier_fee_bps': 1},   # 1%
+                {'tier_min_aum': 5000000, 'tier_max_aum': 999999999999, 'tier_fee_bps': 1}  # 1%
             ],
             'Mutual Fund Wrap': [
-                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_pct': 1},        # 1%
-                {'tier_min_aum': 1000000, 'tier_max_aum': 5000000, 'tier_fee_pct': 1},   # 1%
-                {'tier_min_aum': 5000000, 'tier_max_aum': 999999999999, 'tier_fee_pct': 1}  # 1%
+                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_bps': 1},        # 1%
+                {'tier_min_aum': 1000000, 'tier_max_aum': 5000000, 'tier_fee_bps': 1},   # 1%
+                {'tier_min_aum': 5000000, 'tier_max_aum': 999999999999, 'tier_fee_bps': 1}  # 1%
             ],
             'Annuity': [
-                {'tier_min_aum': 0, 'tier_max_aum': 999999999999, 'tier_fee_pct': 1}   # 1%
+                {'tier_min_aum': 0, 'tier_max_aum': 999999999999, 'tier_fee_bps': 1}   # 1%
             ],
             'Cash': [
-                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_pct': 1},        # 1%
-                {'tier_min_aum': 1000000, 'tier_max_aum': 999999999999, 'tier_fee_pct': 1}  # 1%
+                {'tier_min_aum': 0, 'tier_max_aum': 1000000, 'tier_fee_bps': 1},        # 1%
+                {'tier_min_aum': 1000000, 'tier_max_aum': 999999999999, 'tier_fee_bps': 1}  # 1%
             ]
         }
         
@@ -104,7 +104,7 @@ class TierFeeDataGenerator:
                     'business_line_name': business_line_name,  # For display purposes
                     'tier_min_aum': tier['tier_min_aum'],
                     'tier_max_aum': tier['tier_max_aum'],
-                    'tier_fee_pct': tier['tier_fee_pct']
+                    'tier_fee_bps': tier['tier_fee_bps']
                 }
                 
                 tier_fees.append(tier_fee)
@@ -121,10 +121,10 @@ class TierFeeDataGenerator:
             business_line_key INTEGER NOT NULL,
             tier_min_aum DECIMAL(15,2) NOT NULL,
             tier_max_aum DECIMAL(15,2) NOT NULL,
-            tier_fee_pct INTEGER NOT NULL,
+            tier_fee_bps INTEGER NOT NULL,
             FOREIGN KEY (business_line_key) REFERENCES business_line(business_line_key),
             CONSTRAINT check_tier_range CHECK (tier_min_aum <= tier_max_aum),
-            CONSTRAINT check_fee_positive CHECK (tier_fee_pct >= 0)
+            CONSTRAINT check_fee_positive CHECK (tier_fee_bps >= 0)
         );
         
         -- Create indexes for efficient lookups during fee calculations
@@ -163,9 +163,9 @@ class TierFeeDataGenerator:
         
         insert_sql = """
         INSERT INTO tier_fee (
-            business_line_key, tier_min_aum, tier_max_aum, tier_fee_pct
+            business_line_key, tier_min_aum, tier_max_aum, tier_fee_bps
         ) VALUES (
-            %(business_line_key)s, %(tier_min_aum)s, %(tier_max_aum)s, %(tier_fee_pct)s
+            %(business_line_key)s, %(tier_min_aum)s, %(tier_max_aum)s, %(tier_fee_bps)s
         )
         """
         
@@ -200,7 +200,7 @@ class TierFeeDataGenerator:
                         for amount in test_amounts:
                             # Find applicable fee tier
                             cursor.execute("""
-                                SELECT tier_fee_pct 
+                                SELECT tier_fee_bps 
                                 FROM tier_fee 
                                 WHERE business_line_key = %s 
                                 AND %s >= tier_min_aum 
@@ -234,7 +234,7 @@ class TierFeeDataGenerator:
                 SELECT bl.business_line_name, 
                        tf.tier_min_aum, 
                        tf.tier_max_aum, 
-                       tf.tier_fee_pct,
+                       tf.tier_fee_bps,
                        CASE 
                            WHEN tf.tier_max_aum = 999999999999 THEN 'No limit'
                            ELSE '$' || TO_CHAR(tf.tier_max_aum, 'FM999,999,999')
