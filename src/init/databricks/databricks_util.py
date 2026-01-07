@@ -1,0 +1,337 @@
+import logging
+from typing import Dict, List, Optional
+import pandas as pd
+import databricks.sdk
+from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.sql import StatementState
+import mlflow
+import mlflow.langchain
+import datetime
+import uuid
+
+def execute_query(query: str, warehouse_id: str) -> Dict:
+    """
+    Execute a SQL query using Databricks SDK with native authentication.
+
+    Args:
+        query: SQL query string to execute. Tables should be fully qualified as
+               `catalog_name`.`schema_name`.`table_name`
+        warehouse_id: Databricks SQL warehouse ID
+
+    Returns:
+        Dict with keys:
+            - 'success' (bool): Whether query executed successfully
+            - 'data' (pd.DataFrame | None): Query results as DataFrame
+            - 'error' (str | None): Error message if failed
+
+    Note: Uses native Databricks authentication (WorkspaceClient).
+    When deployed as Model Serving Endpoint, runs with service principal permissions.
+    """
+    w = WorkspaceClient()
+
+    response = w.statement_execution.execute_statement(
+        statement=query,
+        warehouse_id=warehouse_id,
+        wait_timeout="50s"
+    )
+
+    # Check if query execution failed
+    if response.status.state == StatementState.FAILED:
+        return {
+            'success': False,
+            'data': None,
+            'error': response.status.error.message
+        }
+    else:
+        # Query executed successfully - convert to DataFrame
+        columns = [col.name for col in response.manifest.schema.columns]
+        data = response.result.data_array if response.result else []
+        df = pd.DataFrame(data, columns=columns)
+
+        return {
+            'success': True,
+            'data': df,
+            'error': None
+        }   
+
+def fill_database_schema(database_schema, warehouse_id):
+    """
+    Fill column_values and date_range fields in database_schema using optimized batch queries.
+
+    This function executes all queries from query_to_get_column_values and query_to_get_date_range
+    using UNION ALL to minimize database round trips.
+
+    Args:
+        database_schema: List of table dictionaries with columns (will be modified in-place)
+        warehouse_id: Databricks SQL warehouse ID
+
+    Returns:
+        database_schema: The modified database_schema with filled column_values and date_range
+    """
+    # Collect all queries with metadata about their location
+    column_value_queries = []
+    date_range_queries = []
+
+    for table_idx, table in enumerate(database_schema):
+        table_name = table['table_name']
+        for column_name, column_info in table['columns'].items():
+            # Collect column value queries
+            query = column_info.get('query_to_get_column_values', '').strip()
+            if query:
+                column_value_queries.append({
+                    'table_idx': table_idx,
+                    'column_name': column_name,
+                    'query': query,
+                    'identifier': f"{table_name}.{column_name}"
+                })
+
+            # Collect date range queries
+            date_query = column_info.get('query_to_get_date_range', '').strip()
+            if date_query:
+                date_range_queries.append({
+                    'table_idx': table_idx,
+                    'column_name': column_name,
+                    'query': date_query,
+                    'identifier': f"{table_name}.{column_name}"
+                })
+
+    # Execute column value queries with UNION ALL
+    if column_value_queries:
+        logging.info(f"Executing {len(column_value_queries)} column value queries in a single batch...")
+        union_parts = []
+        for item in column_value_queries:
+            # Wrap each query to add an identifier column
+            union_parts.append(f"SELECT '{item['identifier']}' AS _identifier, CAST(value AS STRING) AS value FROM ({item['query']}) AS subq(value)")
+
+        batch_query = " UNION ALL ".join(union_parts)
+        result = execute_query(batch_query, warehouse_id)
+
+        if result['success']:
+            df = result['data']
+
+            # Use pandas groupby for performance (faster than loops)
+            if df is not None and not df.empty:
+                grouped = df.groupby('_identifier')['value'].apply(
+                    lambda x: ' | '.join(x.dropna().astype(str))
+                ).to_dict()
+
+                # Fill the database_schema with results
+                for item in column_value_queries:
+                    identifier = item['identifier']
+                    if identifier in grouped:
+                        database_schema[item['table_idx']]['columns'][item['column_name']]['column_values'] = grouped[identifier]
+        else:
+            logging.error(f"Column value queries failed: {result['error']}")
+
+    # Execute date range queries with UNION ALL
+    if date_range_queries:
+        logging.info(f"Executing {len(date_range_queries)} date range queries in a single batch...")
+        union_parts = []
+        for item in date_range_queries:
+            # Wrap each query to add an identifier column
+            union_parts.append(f"SELECT '{item['identifier']}' AS _identifier, CAST(value AS STRING) AS value FROM ({item['query']}) AS subq(value)")
+
+        batch_query = " UNION ALL ".join(union_parts)
+        result = execute_query(batch_query, warehouse_id)
+
+        if result['success']:
+            df = result['data']
+
+            # Use pandas set_index for performance (O(1) lookup vs O(n) loops)
+            if df is not None and not df.empty:
+                date_mapping = df.set_index('_identifier')['value'].to_dict()
+
+                # Fill the database_schema with results
+                for item in date_range_queries:
+                    identifier = item['identifier']
+                    if identifier in date_mapping and date_mapping[identifier] is not None:
+                        database_schema[item['table_idx']]['columns'][item['column_name']]['date_range'] = str(date_mapping[identifier])
+        else:
+            logging.error(f"Date range queries failed: {result['error']}")
+
+    logging.info("Database schema filling completed!")
+    return database_schema
+
+def create_objects_documentation(database_schema, table_relationships, key_terms, warehouse_id=None):
+    """
+    Build comprehensive database schema context string.
+
+    Note: This function now expects database_schema to have pre-filled column_values
+    and date_range fields. Use fill_database_schema() before calling this function.
+
+    Args:
+        database_schema: List of table dictionaries with columns (with pre-filled values)
+        table_relationships: List of relationship dictionaries
+        key_terms: List of business term dictionaries
+        warehouse_id: DEPRECATED - No longer used. Kept for backward compatibility.
+
+    Returns:
+        str: Formatted documentation string
+    """
+    objects_documentation = []
+    date_range_entries = []
+
+    # Add all tables with all their columns AND values
+    for table in database_schema:
+        table_name = table['table_name']
+        table_desc = table['table_description']
+
+        # Start with table info
+        table_text = f"Table {table_name}: {table_desc}\n"
+        table_text += "Columns:\n"
+
+        # Add all columns for this table
+        for column_name, column_info in table['columns'].items():
+            table_text += f"  - Column {column_name}: {column_info['description']}\n"
+
+            # Use pre-filled column_values
+            column_values = column_info.get('column_values', '').strip()
+            if column_values:
+                table_text += f"    Values in column {column_name}: {column_values}\n"
+
+            # Use pre-filled date_range
+            date_range = column_info.get('date_range', '').strip()
+            if date_range:
+                date_range_entries.append(f"  - Table {table_name}, column {column_name}: {date_range}\n")
+
+        objects_documentation.append(table_text)
+
+    # Add ALL table relationships
+    relationships_text = "\nRelationships between Tables:\n"
+    for rel in table_relationships:
+        relationships_text += f"  {rel['key1']} -> {rel['key2']}\n"
+    objects_documentation.append(relationships_text)
+
+    # Add date range information
+    if date_range_entries:
+        date_range = "\nImportant considerations about dates available:\n"
+        date_range += "".join(date_range_entries)
+        objects_documentation.append(date_range)
+
+    # Add key terms with query instructions
+    key_terms_text = "\nQuery instructions for key terms:\n"
+    for term in key_terms:
+        term_name = term['name']
+        term_definition = term['definition']
+        query_instructions = term['query_instructions']
+
+        if term_definition:
+            key_terms_text += f"  - {term_name}: {term_definition}\n"
+        else:
+            key_terms_text += f"  - {term_name}\n"
+
+        if query_instructions:
+            key_terms_text += f"    {query_instructions}\n"
+
+    objects_documentation.append(key_terms_text)
+
+    # Join all parts
+    return "\n".join(objects_documentation)
+
+def start_agent_run_mlflow(experiment_folder:str, agent_name:str, scope:str,
+                        question: str = None, is_new_thread_id: bool = False, 
+                        thread_id: str = None ) -> Dict:
+  """
+  Create or reuse a thread, create the MLflow experiment/run, and return the
+  LangGraph config plus run_id for metrics logging.
+
+  Returns a dict with kets: config, run_id.
+  """
+
+  # Enable autologging and set tracking to Databricks
+  mlflow.langchain.autolog()
+  mlflow.set_tracking_uri("databricks")
+
+  current_month_short = datetime.now().strftime("%b%Y")
+  experiment_name = f"{agent_name}_{scope}_{current_month_short}"
+  experiment_path = f"{experiment_folder}/{experiment_name}"
+
+  experiment = mlflow.get_experiment_by_name(experiment_path)
+  if experiment is None:
+      mlflow.create_experiment(experiment_path)
+  else:
+      mlflow.set_experiment(experiment_path)
+  
+  # Resolve current user 
+  try:
+      w=WorkspaceClient()
+      current_user = w.current_user.me()
+      user_name = current_user.user_name if hasattr(current_user, 'user_name') else 'unknown_user'
+  except Exception as e:
+      user_name = 'unknown_user'
+      logging.warning(f"Could not get current user: {e}")
+  
+  if is_new_thread_id or not thread_id:
+      thread_id = str(uuid.uuid4())
+  
+  date_time_now = datetime.now().strftime("%Y-%m-%d %H:%M")
+  # Naming convention is Run_AgentName_UserName_DateTime_ThreadID
+  run_name = f"Run_{agent_name}_{user_name}_{date_time_now}_{thread_id}"
+
+  # Ensure a fresh run context
+  if mlflow.active_run() is not None:
+      mlflow.end_run()
+  run = mlflow.start_run(run_name=run_name)
+
+  # basic params
+  mlflow.log_param("agent_name",agent_name)
+  mlflow.log_param("scope",scope)
+  mlflow.log_param("thread_id",thread_id)
+  mlflow.log_param("user_name",user_name)
+  mlflow.log_param("run_date",datetime.now().strftime("%Y-%m-%d"))
+  mlflow.log_param("run_time",datetime.now().strftime("%H:%M"))
+  mlflow.log_param("question",question)
+
+  config = {
+      'run_name':run_name,
+      'configurable': {'thread_id':thread_id}
+  }
+
+  return {
+      'config':config,
+      'run_id': run.info.run_id
+  }
+
+def log_agent_metrics_mlflow(result:Dict) -> None:
+    """
+    Log post-execution metrics to the active MLflow run.
+    The run remains open for additional questions in the same thread.
+    """
+
+    # attach to the existing run
+    mlflow.set_tracking_uri("databricks")
+
+    # Scenario
+    scenario = result.get('scenario','Unknown')
+    mlflow.log_param("scenario",scenario)
+
+    # Analytical intents
+    analytical_intents = result.get('analytical_intent',[])
+    for i,intent in enumerate(analytical_intents):
+        mlflow.log_param(f"analytical_intent_{i+1}",intent)
+
+    # Sql queries and details
+    sql_queries = result.get('current_sql_queries',[])
+    for i,query_info in enumerate(sql_queries):
+        original_query = query_info.get('query','')
+        mlflow.log_param(f"sql_query_{i+1}_original",original_query)
+
+        query_result = query_info.get('result','')
+        mlflow.log_param(f"sql_query_{i+1}_result",query_result)
+
+        explanation = query_info.get('explanation','')
+        insight = query_info.get('insight','')
+        metadata = query_info.get('metadata','')
+        mlflow.log_param(f"sql_query_{i+1}_explanation",explanation)
+        mlflow.log_param(f"sql_query_{i+1}_insight",insight)
+        mlflow.log_param(f"sql_query_{i+1}_metadata",metadata)
+
+        was_refined = "Query result too large after 3 refinements" in str(query_result) or "Refinement failed" in str(explanation)
+        mlflow.log_param(f"sql_query_{i+1}_was_refined",was_refined)
+
+    # agent response
+    agent_response = result['llm_answer'].content
+    mlflow.log_param("agent_response",agent_response)
+
+
+
