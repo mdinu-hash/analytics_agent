@@ -1,323 +1,79 @@
-# test access to db file: import db tables into data frames and select by the column names
+from typing import Sequence, Literal, Annotated
+from typing_extensions import TypedDict
 
-import pandas as pd
-import langchain, langgraph, langchain_openai, langsmith
-import os
-from pathlib import Path
-from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool
-import datetime
-from typing_extensions import TypedDict, Annotated, Literal, Union
-from langgraph.graph.message import add_messages
-from typing import Sequence
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, RemoveMessage
+# LangChain & LangGraph
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.agents import AgentAction
-import operator
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from typing import Iterator
-from langchain_core.vectorstores import InMemoryVectorStore
-from langchain_openai import OpenAIEmbeddings
-from langchain_core.documents import Document
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_core.tools import tool
+from databricks_langchain import ChatDatabricks
 from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
-import queue
 
-# Import initialization components
-from src.init.initialization import (
-    llm, llm_fast, create_config, tracer,
-    objects_documentation, sql_dialect, connection_string
-)
-from src.init.llm_util import create_prompt_template, get_token_usage, calculate_chat_history_tokens, llm_provider
+# Import utilities
+from utilities import query_genie as query_genie_api, objects_documentation
 
-# Import PostgreSQL database utility
-from src.init.init_demo_database.demo_database_util import execute_query, create_objects_documentation
+# Genie space ID
+GENIE_SPACE_ID = "your-genie-space-id"  
 
-# Import business glossary
-from src.init.business_glossary import key_terms, synonyms, related_terms, search_terms
+# Initialize LLM (Databricks Foundation Model)
+llm = ChatDatabricks(endpoint="databricks-claude-sonnet-4", temperature=0)
 
-# Import database schema
-from src.init.database_schema import database_schema, table_relationships
-
-_progress_queue = queue.Queue()  # Global shared progress queue
-
-def set_progress_queue(q):
-    global _progress_queue
-    _progress_queue = q
-
-def get_progress_queue():
-    return _progress_queue
-
-def show_progress(message: str):
-    """Push a message to the Streamlit progress queue"""
-    _progress_queue.put(message)
-
-
-vector_store = None
-
-# define the state of the graph, which includes user's question, AI's answer, query that has been created and its result;
+# LangGraph state
 
 class State(TypedDict):
- objects_documentation: str
- sql_dialect: str
- messages_log: Annotated[Sequence[BaseMessage], add_messages]
- intermediate_steps: list[AgentAction]
- analytical_intent: list[str]
- current_question: str
- current_sql_queries: list[dict]
- generate_answer_details: dict
- llm_answer: BaseMessage
- scenario: str
- search_terms_output: dict  
+    """Agent state"""
+    messages_log: Annotated[Sequence[BaseMessage], add_messages]  # Chat history
+    current_question: str  # Latest user question
+    current_sql_queries: list[dict]  # SQL queries with results: [{'query': str, 'explanation': str, 'result': str}]
+    llm_answer: BaseMessage  # AI response
+    scenario: str  # A (data query), B (pleasantries), C (data unavailable), D (ambiguous)
+    generate_answer_details: dict  # Contains: agent_questions, key_assumptions, ambiguity_explanation
+    intermediate_steps: list[AgentAction]  # Execution tracking
 
-def extract_msg_content_from_history(messages_log:list):
- ''' from a list of base messages, extract just the content '''
- content = []
- for msg in messages_log:
-     content.append(msg.content)
- return "\n".join(content)
+# classes for agent's structured output
 
-class ClearOrAmbiguous(TypedDict):
-  ''' conclusion about the analytical intent extraction process '''
-  analytical_intent_clearness: Annotated[Literal["CLEAR", "AMBIGUOUS"],"conclusion about the analytical intent extraction process"] 
-
-class TermSubstitution(TypedDict):
-  ''' term substitution made when creating analytical intent '''
-  relationship: Annotated[Literal["synonym", "related_term"], "type of relationship between terms"]
-  searched_for: Annotated[str, "term from user question"]
-  replacement_term: Annotated[str, "term used in analytical intent"]
-
-class AnalyticalIntents(TypedDict):
-  ''' list of analytical intents with term substitutions '''
-  analytical_intent: Annotated[Union[list[str], None] ,"natural language descriptions to capture the analytical intents"]
-  term_substitutions: Annotated[list[TermSubstitution], "list of term substitutions made (empty list if none)"]
-
-class AmbiguityAnalysis(TypedDict):
-  ''' analysis of ambiguous question with explanation and alternatives '''
-  ambiguity_explanation: Annotated[str, "brief explanation of what makes the question ambiguous"]
-  agent_questions: Annotated[list[str], "2-3 alternative analytical intents as questions"]
-
-@tool
-def extract_analytical_intent(state:State):
-  ''' Generates analytical intents when question is clear (scenario A only) '''
-
-  sys_prompt_clear = """Refine technically the user ask for a sql developer with access to the following database schema:
-  {objects_documentation}.
-
-  Conversation history:
-  "{messages_log}".
-
-  Last user prompt:
-  "{question}".
-
-Important considerations about creating analytical intents:
-    - The analytical intent will be used to create a single sql query.
-    - Write it in 1 sentence.
-    - Mention just the column names, tables names, grouping levels, aggregation functions (preffered if it doesn't restrict insights) and filters from the database schema.
-    - If the user ask is exploratory (ex: "What can you tell me about the dataset?"), create 3-5 analytical intents.
-    - If the user ask is non-exploratory, create only one analytical intent.
-    - If the user asks for statistical analysis between variables (ex correlation) do not compute the statistical metrics, instead just show a simple side by side or group summary.
-
-  Important considerations about time based analysis:
-    - If the source columns are from tables showing evolutions of metrics over time, clearly specify the time range to apply the analysis on:
-      Example: If the question does not specify a time range, specify a recent period like last 12 months, last 3 months.
-    - Use explicit date filters instead of relative expressions like "last 12 months".
-    - Derive actual date ranges from the database schema under "Important considerations about dates available".
-    - Group the specified period in time-based groups (monthly, quarterly) and compare first with last group.
-
-  Important considerations about complex, multi-steps analytical intents:
-  - An analytical query is multi-step if it requires sequential data gathering and statistical analysis,
-    where each search builds upon previous results to examine relationships, correlations, or comparative patterns between variables.
-  - Break it down into sequential steps where each represents a distinct analytical intent:
-    Template: "Step 1: <analytical intent 1>. Step 2: <analytical intent 2>. Step 3: <analytical intent 3>"
-
-  Important: Track term substitutions
-  - Available term mappings (synonyms and related terms):
-    {available_term_mappings}
-
-  - ONLY use the term mappings provided above when deciding on substitutions.
-  - If you used a synonym or related term from the available term mappings instead of the user's exact terminology, report it in term_substitutions.
-  - For each substitution, specify:
-    * relationship: "synonym" if the terms mean the same thing, "related_term" if they're similar but different concepts.
-    * searched_for: the exact term from the user's question.
-    * replacement_term: the term from the database schema you used in the analytical intent.
-  - If no substitutions were made, return an empty list for term_substitutions.
-    """
-
-  # Prepare input data
-  search_terms_output = state['search_terms_output']
-
-  input_data = {
-        'objects_documentation': state['objects_documentation'],
-        'question': state['current_question'],
-        'messages_log': extract_msg_content_from_history(state['messages_log']),
-        'available_term_mappings': search_terms_output.get('documentation', 'None')
-   }
-
-  # Create analytical intent (question is already determined to be clear by clarification_check)
-  prompt_clear = create_prompt_template('system', sys_prompt_clear)
-  chain = prompt_clear | llm.with_structured_output(AnalyticalIntents)
-  result = chain.invoke(input_data)
-
-  # Store term_substitutions in search_terms_output
-  state['search_terms_output']['term_substitutions'] = result.get('term_substitutions', [])
-
-  # Update the state (scenario A already set by clarification_check)
-  state['analytical_intent'] = result['analytical_intent']
-  state['generate_answer_details']['ambiguity_explanation'] = ''
-  state['generate_answer_details']['agent_questions'] = []
-
-  # control flow
-  action = AgentAction(tool='extract_analytical_intent', tool_input='', log='tool ran successfully')
-  state['intermediate_steps'].append(action)
-  state['intermediate_steps'].append(AgentAction(tool='create_sql_query_or_queries', tool_input='', log=''))
-
-  return state
-
-class OutputAsAQuery(TypedDict):
-  """ generated sql query or sql queries if there are multiple """
-  query: Annotated[list[str],"clean sql query"]
-
-@tool
-def create_sql_query_or_queries(state:State):
-  """ creates sql query/queries to anwser a question based on documentation of tables and columns available """
-
-  system_prompt = """You are a sql expert and an expert data modeler.
-
-  Your task is to create sql scripts in {sql_dialect} dialect to answer the analytical intent(s). In each sql script, use only these tables and columns you have access to:
-  {objects_documentation}.
-
-  Analytical intent(s):
-  {analytical_intent}
-
-  Answer just with the resulting sql code(s).
-
-  Important quality requirements for every sql string:
-    - Return one sql string for every analytical intent.
-    - Return only raw SQL strings in the list.
-    - DO NOT include comments (like "-- Query 1"), labels, or explanations.
-    - If only one SQL query is needed, just return a list with that one query.
-    - GROUP BY expressions must match the non-aggregated SELECT expressions.
-    - Ensure that any expression used in ORDER BY also appears in the SELECT clause.
-    - If you filter by specific text values, use trim, lowercase and pattern matching with LIKE and wildcard (ex: "where trim(lower(column_name)) LIKE trim(lower('%ValueTofilterBy%'))"). For multiple search terms, use multiple wildcards (ex: "where trim(lower(firm_name)) like '%oak%wealth%'"). 
-    - Keep query performance in mind. 
-      Example: Avoid CROSS JOIN by using a (scalar) subquery directly in CASE statements.
-
-  Important considerations about multi-steps analytical intents (the ones that contain "Step 1:", "Step 2:" etc):
-  Create a sophisticated SQL query using CTEs that mirror the steps:
-  - Each "Step X" becomes a corresponding CTE.
-  - Name CTEs descriptively based on what each step accomplishes.
-  - Build each CTE using results from previous CTEs.
-  - Final SELECT provides the complete analysis.   
-
-  Example output (simple, non multi-steps):
-    [
-      "SELECT COUNT(*) FROM feedback;",
-      "SELECT AVG(product_price) FROM products;"
-    ]
-
-   Example output (multi-steps):
-    [
-      "    WITH step1_descriptive_name AS (
-        -- Implementation of Step 1 from analytical intent
-        SELECT ...
-    ),
-    step2_descriptive_name AS (
-        -- Implementation of Step 2, using step1 results
-        SELECT ... FROM step1_descriptive_name ...
-    ),
-    step3_final_analysis AS (
-        -- Implementation of Step 3, final analysis
-        SELECT ... FROM step2_descriptive_name ...
-    )
-    SELECT
-        clear_result_columns,
-        meaningful_calculations,
-        percentage_or_comparison_metrics
-    FROM step3_final_analysis
-    ORDER BY logical_sort_order;"
-    ]  
-  """
-
-  prompt = create_prompt_template('system', system_prompt)
-
-  chain = prompt | llm.with_structured_output(OutputAsAQuery)
-
-  result = chain.invoke({'objects_documentation':state['objects_documentation'], 'analytical_intent': state['analytical_intent'],'sql_dialect':state['sql_dialect']})
-  show_progress(f"✅ SQL queries created:{len(result['query'])}")
-  for q in result['query']:
-   state['current_sql_queries'].append( {'query': q,
-                                     'explanation': '', ## add it later
-                                     'result':'', ## add it later
-                                     'insight': '' ## add it later
-                                      } )
-  
-  
-  
-  # control flow
-  action = AgentAction(tool='create_sql_query_or_queries', tool_input='',log='tool ran successfully')
-  state['intermediate_steps'].append(action)
-  state['intermediate_steps'].append(AgentAction(tool='execute_sql_query', tool_input='', log=''))
-  return state
-
-# since gpt-4o allows a maximum completion limit (output context limit) of 4k tokens, I half it to get maximum context size, so 2k. Assuming the entire context is not just the data,
-# I divide this number by 5 and arrive at a limit of 400 tokens for the result of the sql query.
-
-import tiktoken
-
-maximum_nr_tokens_sql_query = 500
-
-# create a function that counts the tokens from a string
-def count_tokens(string:str):
- """ returns the number of tokens in a text string """
- encoding = tiktoken.encoding_for_model("gpt-4o")
- num_tokens = len(encoding.encode(string))
- return num_tokens
-
-# create a function that compares the tokens from the sql query result with the maximum token limit, and returns true if the context limit has been exceeded, false otherwise.
-def check_if_exceed_maximum_context_limit(sql_query_result):
- """ compares the tokens from the sql query result with the maximum token limit, and returns true if the context limit has been exceeded, false otherwise """
- tokens_sql_query_result = count_tokens(sql_query_result)
- if tokens_sql_query_result > maximum_nr_tokens_sql_query:
-  return True
- else:
-  return False  
-
-class QueryInsight(TypedDict):
-    ''' insight extracted from a sql query result '''
-    insight: str
-
-def create_query_insight(sql_query:str, sql_query_result:str):
-   ''' creates insight from the result of the sql query '''
-   system_prompt = """
-   You are an expert data analyst.
-
-   You are provided with the following SQL query:
-   {sql_query}.
-
-   Which yielded the following result:
-   {sql_query_result}.
-
-   Provide an insight based on the query results:
-
-   Insight: Key findings from the results, stating facts directly without technical terms.
-       - Do not mention your subjective assessment over the results.
-       - Avoid technical terms like "data","dataset","table","list","provided information","query" etc.
-   """
-
-   prompt = create_prompt_template('system', system_prompt)
-   chain = prompt | llm_fast.with_structured_output(QueryInsight)
-   return chain.invoke({'sql_query':sql_query,
-                        'sql_query_result':sql_query_result})
-
+class AgentQuestions(TypedDict):
+    """Next step suggestions for the user"""
+    agent_questions: Annotated[list[str], "max 2 smart next steps for the user to explore further"]
 
 class QueryExplanation(TypedDict):
+    """Explanation highlights for SQL query assumptions"""
     explanation: Annotated[list[str], "2-5 concise assumptions/highlights"]
 
+class ScenarioDecision(TypedDict):
+    """Decision for routing"""
+    next_step: Annotated[Literal["B", "C", "Continue"], "indication of the next step"]
+
+class ClearOrAmbiguous(TypedDict):
+    """Conclusion about question clarity"""
+    analytical_intent_clearness: Annotated[Literal["CLEAR", "AMBIGUOUS"], "conclusion about the analytical intent"]
+
+class AmbiguityAnalysis(TypedDict):
+    """Analysis of ambiguous question with explanation and alternatives"""
+    ambiguity_explanation: Annotated[str, "brief explanation of what makes the question ambiguous"]
+    agent_questions: Annotated[list[str], "2-3 alternative analytical intents as questions"]
+
+# Helper functions 
+
+def extract_msg_content_from_history(messages_log: list) -> str:
+    """Extract content from message history"""
+    content = []
+    for msg in messages_log:
+        content.append(msg.content)
+    return "\n".join(content)
+
+def format_sql_query_results_for_prompt(sql_queries: list[dict]) -> str:
+    """Format SQL query results for LLM prompt"""
+    formatted_queries = []
+    for query_index, q in enumerate(sql_queries):
+        block = f"Query {query_index+1}:\n{q['query']}\n\nResult of query {query_index+1}:\n{q['result']}"
+        formatted_queries.append(block)
+    return "\n\n".join(formatted_queries)
 
 def create_query_explanation(sql_query: str) -> dict:
     """Generate explanation highlights for query assumptions"""
-
     system_prompt = """You are provided with the following SQL query:
 {sql_query}.
 Your task is to highlight parts of this query to a non-technical user, including only the highlight types below if they exist.
@@ -326,420 +82,20 @@ Guidelines:
 - Use only bullet points, max 0-3 bullet points, keep just the most important info.
 - Keep every bullet very concise, very few words.
 - Don't include filters applied to current records.
-- Don't include highlights that are not part of the list below. 
+- Don't include highlights that are not part of the list below.
 
 List of highlight types:
-  - filters applied. 
-    Ex: “excluded inactive affiliates”.
-  - Show time range of the source table (min/max dates) if the source table for the query has data over time. 
-    Ex: “account snapshot dates between 2021 and 2022”
+  - filters applied.
+    Ex: "excluded inactive affiliates".
+  - Show time range of the source table (min/max dates) if the source table for the query has data over time.
+    Ex: "account snapshot dates between 2021 and 2022"
   - TOP X rows limits the result.
-    Ex: "Results limited to top 10 affiliates by assets”  
+    Ex: "Results limited to top 10 affiliates by assets"
     """
-
-    prompt = create_prompt_template('system', system_prompt)
-    chain = prompt | llm_fast.with_structured_output(QueryExplanation)
-
-    llm_explanation = chain.invoke({
-        'sql_query': sql_query
-    })
-
+    prompt = ChatPromptTemplate.from_messages([('user', system_prompt)])
+    chain = prompt | llm.with_structured_output(QueryExplanation)
+    llm_explanation = chain.invoke({'sql_query': sql_query})
     return {'explanation': llm_explanation['explanation']}
-
-
-# the function checks if the query output exceeds context window limit and if yes, send the query for refinement
-
-class OutputAsASingleQuery(TypedDict):
-  """ generated sql query """
-  query: Annotated[str,...,"clean sql query"]
-
-
-def correct_syntax_sql_query(sql_query: str, error:str, objects_documentation: str, sql_dialect: str):
- """ corrects the syntax of sql query """
-
- system_prompt = """
-  Correct the following sql query which returns an error caused by wrong syntax.
-
-  Sql query to correct: {sql_query}.
-  Error details: {error}.
-
-  *** Important considerations for correcting the sql query ***
-      - Make sure the query is valid in {sql_dialect} dialect.
-      - Use only these tables and columns you have access to: {objects_documentation}.
-      - If possible, simplify complex operations (e.g., percentile estimation) using built-in functions compatible with SQLite.
-      - Keep query performance in mind.
-        Example: Avoid CROSS JOIN by using a (scalar) subquery directly in CASE statements.
-
-  Output the corrected version of the query.
-  """
-
- prompt = create_prompt_template('system', system_prompt)
- chain = prompt | llm.with_structured_output(OutputAsASingleQuery)
- result = chain.invoke({'sql_query':sql_query,'error':error,'objects_documentation':objects_documentation, 'sql_dialect':sql_dialect})
- sql_query = result['query']
- return sql_query
-
-def add_key_assumptions_from_term_substitutions(search_terms_output: dict) -> dict:
-    """
-    Creates Key Assumptions based on term substitutions reported by LLM.
-
-    Args:
-        search_terms_output: Output from search_terms function (contains term_substitutions)
-
-    Returns:
-        dict with 'key_assumptions': list of assumption strings
-    """
-    key_assumptions = []
-    term_substitutions = search_terms_output.get('term_substitutions', [])
-
-    for substitution in term_substitutions:
-        relationship = substitution.get('relationship')
-        searched_for = substitution.get('searched_for', '')
-        replacement_term = substitution.get('replacement_term', '')
-
-        # Look up definitions for the replacement term from search_terms_output
-        replacement_def = ''
-        for term in search_terms_output.get('key_terms', []):
-            if term.get('name', '').lower() == replacement_term.lower():
-                replacement_def = term.get('definition', '')
-                break
-
-        if relationship == 'synonym':
-            # Get searched_for definition from synonym data (handle both single and multiple synonyms)
-            searched_for_def = ''
-            synonym_data = search_terms_output.get('synonym')
-            if synonym_data:
-                # Check if single synonym or multiple synonyms
-                if 'matches' in synonym_data:
-                    # Multiple synonyms - search in matches list
-                    for syn_match in synonym_data['matches']:
-                        if syn_match.get('searched_for', '').lower() == searched_for.lower():
-                            searched_for_def = syn_match.get('definition', '')
-                            break
-                else:
-                    # Single synonym
-                    if synonym_data.get('searched_for', '').lower() == searched_for.lower():
-                        searched_for_def = synonym_data.get('definition', '')
-
-            # "{replacement_term} is {replacement_def}"
-            if replacement_def:
-                key_assumptions.append(f"{replacement_term} is {replacement_def}")
-
-        elif relationship == 'related_term':
-            # Get searched_for definition from related_terms
-            searched_for_def = ''
-            related_terms_data = search_terms_output.get('related_terms')
-            if related_terms_data and related_terms_data.get('searched_for', '').lower() == searched_for.lower():
-                searched_for_def = related_terms_data.get('definition', '')
-
-            if searched_for_def:
-                # "{searched_for} ({searched_for_def}) does not exist in the tables I have access to. I returned the data for {replacement_term} ({replacement_def})"
-                if replacement_def:
-                    key_assumptions.append(
-                        f"{searched_for} ({searched_for_def}) does not exist in the tables I have access to. I returned the data for {replacement_term} ({replacement_def})"
-                    )
-                else:
-                    key_assumptions.append(
-                        f"{searched_for} ({searched_for_def}) does not exist in the tables I have access to. I returned the data for {replacement_term}"
-                    )
-            else:
-                # "I returned the data for {replacement_term} ({replacement_def})"
-                if replacement_def:
-                    key_assumptions.append(f"I returned the data for {replacement_term} ({replacement_def})")
-                else:
-                    key_assumptions.append(f"I returned the data for {replacement_term}")
-
-    return {'key_assumptions': key_assumptions}
-
-@tool
-def execute_sql_query(state:State):
-  """ executes the sql query and retrieve the result """
-
-  for query_index, q in enumerate(state['current_sql_queries']):
-
-    if state['current_sql_queries'][query_index]['result'] == '':
-     refinement_count = 0
-
-     # refine the query up to 3 times if necessary.
-     while refinement_count < 3:
-
-       # Always read the current query from state to ensure we're executing the latest refined version
-       sql_query = state['current_sql_queries'][query_index]['query']
-
-       # executes the query and if it throws an error, correct it (max 3x times) then execute it again.
-       try:
-           results = execute_query(sql_query, connection_string)
-           if results is None or len(results) == 0:
-               sql_query_result = "No results found."
-           else:
-               # Convert results to DataFrame for string representation
-               sql_query_result_df = pd.DataFrame(results)
-               sql_query_result = sql_query_result_df.to_string(index=False, header=False)
-       except Exception as e:
-           sql_query_result = f"Error: {str(e)}"
-
-       attempt = 0
-       while 'Error' in sql_query_result and attempt < 3:
-            error = sql_query_result
-            sql_query = correct_syntax_sql_query(sql_query,error,objects_documentation,state['sql_dialect'])
-            # Update state with corrected query immediately
-            state['current_sql_queries'][query_index]['query'] = sql_query
-
-            try:
-                results = execute_query(sql_query, connection_string)
-                if results is None or len(results) == 0:
-                    sql_query_result = "No results found."
-                else:
-                    sql_query_result_df = pd.DataFrame(results)
-                    sql_query_result = sql_query_result_df.to_string(index=False, header=False)
-            except Exception as e:
-                sql_query_result = f"Error: {str(e)}"
-
-            attempt += 1
-
-       # if the sql query does not exceed output context window return its result
-       if not check_if_exceed_maximum_context_limit(sql_query_result):
-         analysis = create_query_insight(sql_query, sql_query_result)
-
-         # Update state
-         state['current_sql_queries'][query_index]['result'] = sql_query_result
-         state['current_sql_queries'][query_index]['insight'] = analysis['insight']
-         state['current_sql_queries'][query_index]['query'] = sql_query
-
-         break
-
-       # if the sql query exceeds output context window and there is more room for iterations, refine the query
-       elif refinement_count < 2:  # Can refine max 2 times
-        # Get the specific analytical intent for this query (use index if available, otherwise join all)
-        if query_index < len(state['analytical_intent']):
-            analytical_intent = state['analytical_intent'][query_index]
-        else:
-            analytical_intent = ' | '.join(state['analytical_intent']) if state['analytical_intent'] else ''
-        sql_query = refine_sql_query(analytical_intent,sql_query,state['objects_documentation'],state['sql_dialect'])
-        # Update state with refined query immediately
-        state['current_sql_queries'][query_index]['query'] = sql_query
-        refinement_count += 1
-        # Continue loop to execute refined query immediately
-
-       # if there is no more room for sql query iterations and the result still exceeds context window, throw a message
-       else:
-        state['current_sql_queries'][query_index]['result'] = 'Query result too large after 3 refinements.'
-        break
-
-  # Add routing to generate_answer 
-  action = AgentAction(tool='execute_sql_query', tool_input='', log='tool ran successfully')
-  state['intermediate_steps'].append(action)
-  state['intermediate_steps'].append(AgentAction(tool='generate_answer', tool_input='', log=''))
-
-  return state
-
-def refine_sql_query(analytical_intent: str, sql_query: str, objects_documentation: str, sql_dialect:str):
- """ refines the sql query so that its output tokens do not exceed the maximum context limit """
-
- system_prompt = """
-  As a sql expert, your task is to optimize a sql query that returns more than 20 rows or exceeds the token limit.
-
-  You are trying to answer the following analytical intent: {analytical_intent}.
-  Sql query to optimize: {sql_query}.
-
-  *** Important considerations for creating the sql query ***
-  - Make sure the query is valid in {sql_dialect} dialect.
-  - Use only these tables and columns you have access to: {objects_documentation}.
-  
-  *** Optimization Examples ***  
-  
-  A. Apply aggregation functions instead of returning a list of records.
-      Example: - Analytical intent: "number of distinct ids in table where column equals 5"
-               - Original sql query: "SELECT DISTINCT id FROM table WHERE column = 5;"
-			         - Refined sql query: "SELECT COUNT(DISTINCT id) FROM table WHERE column = 5;"
-			
-  B. Group the data at a higher granularity.
-     Example: If sql query shows data by days, group by months and return last N months.
-  
-  C. Group the data in buckets.
-      Example: - Analytical intent: "Analyze the relationship between products.product_price and products.product_average-rating in the products table to determine if product price influences average rating."
-               - Original sql query: "SELECT product_price, product_average_rating FROM products GROUP BY product_price, product_average_rating"
-			         - Refined sql query: "SELECT 
-                                         CASE 
-                                             WHEN product_price < 10 THEN '<$10'
-                                             WHEN product_price >= 10 AND product_price < 50 THEN '$10–$50'
-                                             ELSE '$50+'
-                                             END AS price_bucket,
-                                         CASE 
-                                             WHEN product_price < 10 THEN 1
-                                             WHEN product_price >= 10 AND product_price < 50 THEN 2
-                                             ELSE 3
-                                             END AS price_bucket_sort,                                             
-                                         ROUND(AVG(product_average_rating), 2) AS avg_rating,
-                                         COUNT(*) AS product_count
-                                   FROM products
-                                   GROUP BY price_bucket
-                                   ORDER BY price_bucket_sort;"
-   
-  
-  D. Apply filters.
-     Examples: - Time-based filters: Show records for the last 3 months. Check the database schema for date range information under "Important considerations about dates available".
-              - Filter for a single company. Use values from the database schema. 
-  
-  E. Show top records.
-     Provide a snapshot of data by retrieving maximum 20 rows and 5 columns.
-     Example: The Analytical intent is: "average sale per customer", but there are too many customers, so show top N.
-                       - Original sql query: "SELECT customer_name, avg(sale) as avg_sale from sales group by customer_name"
-			                 - Refined sql query: "SELECT customer_name, avg(sale) as avg_sale from sales group by customer_name ORDER BY avg_sale desc limit 10;"
-
-  *** Optimization Guidelines ***  
-      1. Do not eliminate key dimensions that are explicitly part of the analytical intent.  
-         For example, if the user asks for time based analysis per customer, do not drop time or customer attributes. 
-         Instead, you can use optimization example D (filter date range) or example B (aggregate time at higher level).                   
-  """
- 
- prompt = create_prompt_template('system', system_prompt)
- chain = prompt | llm.with_structured_output(OutputAsASingleQuery)
-
- result = chain.invoke({'analytical_intent': analytical_intent,
-               'sql_query':sql_query,
-               'objects_documentation':objects_documentation,
-               'sql_dialect':sql_dialect}
-               )
- return result['query']
-
-# Each scenario
-
-scenario_A = {
-    'Type': 'A',
-    'Prompt': """You are a decision support consultant helping users become more data-driven.
-Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
-
-Here is the conversation history with the user:
-{messages_log}.
-Latest user message:
-{question}.
-- Use both the raw SQL results and the extracted insights below to form your answer: {insights}.
-- Don't assume facts that are not backed up by the data in the insights.
-- Include all details from these insights.
-- Suggest these next steps for the user: {agent_questions}.
-
-Response guidelines:
-  - Respond in clear, non-technical language.
-  - Be concise.
-  - Keep it simple and conversational.
-  - If the question is smart, reinforce the user's question to build confidence.
-    Example: "Great instinct to ask that - it's how data-savvy pros think!"
-  - Ask the user which option they prefer from your suggested next steps.
-  - Use warm, supportive closing that makes the user feel good.
-    Example: "Keep up the great work!", "Have a great day ahead!"
-""",
-    'Invoke_Params': lambda state: {
-        'messages_log': state['messages_log'],
-        'question': state['current_question'],
-        'objects_documentation': state['objects_documentation'],
-        'insights': format_sql_query_results_for_prompt(state['current_sql_queries']),
-        'agent_questions': state['generate_answer_details'].get('agent_questions', [])
-    }
-}
-
-scenario_B = {
-    'Type': 'B',
-    'Prompt': """You are a decision support consultant helping users become more data-driven.
-Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
-
-Here is the conversation history with the user:
-{messages_log}.
-
-Latest user message:
-{question}.
-
-- Suggest these next steps for the user: {agent_questions}
-
-Response guidelines:
-  - Respond in clear, non-technical language.
-  - Be concise.
-  - Keep it simple and conversational.
-  - Ask the user which option they prefer from your suggested next steps.""",
-    'Invoke_Params': lambda state: {
-        'messages_log': state['messages_log'],
-        'question': state['current_question'],
-        'objects_documentation': state['objects_documentation'],
-        'agent_questions': state['generate_answer_details'].get('agent_questions', [])
-    }
-}
-
-scenario_C = {
-    'Type': 'C',
-    'Prompt': """You are a decision support consultant helping users become more data-driven.
-Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
-
-Here is the conversation history with the user:
-{messages_log}.
-
-Latest user message:
-{question}.
-
-Unfortunately, the requested information from last prompt is not available in our database.
-
-- Suggest these next steps for the user: {agent_questions}.
-
-Response guidelines:
-  - Respond in clear, non-technical language.
-  - Be concise.
-  - Keep it simple and conversational.
-  - Ask the user which option they prefer from your suggested next steps.""",
-    'Invoke_Params': lambda state: {
-        'messages_log': state['messages_log'],
-        'question': state['current_question'],
-        'objects_documentation': state['objects_documentation'],
-        'agent_questions': state['generate_answer_details'].get('agent_questions', [])
-    }
-}
-
-scenario_D = {
-    'Type': 'D',
-    'Prompt': """You are a decision support consultant helping users become more data-driven.
-Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
-
-Here is the conversation history with the user:
-{messages_log}.
-
-Latest user message:
-{question}.
-
-The last user prompt could be interpreted in multiple ways.
-Explain the user this ambiguity reason: {ambiguity_explanation}.
-And ask user to specify which of these analysis it wants: {agent_questions}.
-Respond in clear, non-technical language.
-Be concise.
-Keep it simple and conversational.""",
-    'Invoke_Params': lambda state: {
-        'messages_log': state['messages_log'],
-        'question': state['current_question'],
-        'objects_documentation': state['objects_documentation'],
-        'ambiguity_explanation': state['generate_answer_details'].get('ambiguity_explanation', ''),
-        'agent_questions': state['generate_answer_details'].get('agent_questions', [])
-    }
-}
-
-scenario_prompts = [scenario_A,scenario_B,scenario_C,scenario_D]
-
-def format_sql_query_results_for_prompt (sql_queries : list[dict]) -> str:
-    """ based on the current_sql_queries, creates a string like so: Insight 1: ... Raw Result of insight 1: ... Insight 2 ... etc """
-    formatted_queries = []
-    for query_index,q in enumerate(sql_queries):
-        block = f"Insight {query_index+1}:\n{q['insight']}\n\nRaw Result of insight {query_index+1}:\n{q['result']}"
-        formatted_queries.append(block)
-    return "\n\n".join(formatted_queries)
-
-
-def format_key_assumptions_for_prompt(key_assumptions: list[str]) -> str:
-    """Format key assumptions into single section"""
-    if not key_assumptions:
-        return ""
-
-    unique_assumptions = list(dict.fromkeys(key_assumptions))
-    return "\n\n**Key Assumptions:**\n" + "\n".join([f"• {a}" for a in unique_assumptions])
-
-class AgentQuestions(TypedDict):
-  ''' next step suggestions for the user '''
-  agent_questions: Annotated[list[str], "max 2 smart next steps for the user to explore further"]
 
 def generate_agent_questions(state: State) -> list[str]:
     """Generate 2 next steps to guide the user. Only runs for scenarios A, B, or C."""
@@ -780,93 +136,83 @@ Suggest max 2 smart next steps for the user to explore further, chosen from the 
     Example: Instead of analyzing for all companies, suggest filtering for a single company and give a few suggestions.
     """
 
-    prompt = create_prompt_template('system', sys_prompt)
+    prompt = ChatPromptTemplate.from_messages([('system', sys_prompt)])
     chain = prompt | llm.with_structured_output(AgentQuestions)
     result = chain.invoke({
         'messages_log': extract_msg_content_from_history(state['messages_log']),
         'question': state['current_question'],
-        'objects_documentation': state['objects_documentation']
+        'objects_documentation': objects_documentation
     })
     return result['agent_questions']
 
+# Agent nodes
 
-## create a function that generates the agent answer based on sql query result
+def orchestrator(state: State):
+    """ Orchestrator deciding if the user question requires querying the database or is asking for info not available """
+    
+    sys_prompt = """You are a decision support consultant helping users make data-driven decisions.
 
-@tool
-def generate_answer(state:State):
-  """ generates the AI answer taking into consideration the explanation and the result of the sql query that was executed """
+    Your task is to decide the next action for this question: {question}.
 
-  scenario = state['scenario']
+    Conversation history: {messages_log}.
+    Current insights: {insights}.
+    Database schema: {objects_documentation}
 
-  # Generate agent_questions for scenarios A, B, C
-  if scenario in ['A', 'B', 'C']:
-      state['generate_answer_details']['agent_questions'] = generate_agent_questions(state)
+    Decision process:
 
-  # create prompt template based on scenario
-  sys_prompt = next(s['Prompt'] for s in scenario_prompts if s['Type'] == scenario)
-  prompt = create_prompt_template('system', sys_prompt, messages_log=True)
-  llm_answer_chain = prompt | llm
+    Step 1. Check if question is non-analytical or already answered:
+       - If question is just pleasantries ("thank you", "hello", "how are you") → "B"
+       - If the same question was already answered in conversation history → "B"
 
-  # invoke parameters based on scenario
-  invoke_params = next(s['Invoke_Params'](state) for s in scenario_prompts if s['Type'] == scenario)
+    Step 2. Check if requested data exists in schema:
+      - If the user asks for data/metrics not available AND no synonyms or related terms exist in the database schema → "C"
 
-  # Generate LLM response 
-  ai_msg = llm_answer_chain.invoke(invoke_params)
+    Step 3. Otherwise → "Continue".
+    """
 
-  # Update state with response, and the messages log with current question and AI response.
-  state['llm_answer'] = ai_msg
-  state['messages_log'].append(HumanMessage(state['current_question']))
-  state['messages_log'].append(ai_msg)
+    prompt = ChatPromptTemplate.from_messages([('user', sys_prompt)])
+    chain = prompt | llm.with_structured_output(ScenarioDecision)
 
-  # log generate answer run
-  action = AgentAction(tool='generate_answer', tool_input='', log = 'tool ran successfully')
-  state['intermediate_steps'].append(action)
+    result = chain.invoke({
+        'messages_log': extract_msg_content_from_history(state['messages_log']),
+        'question': state['current_question'],
+        'insights': format_sql_query_results_for_prompt(state['current_sql_queries']),
+        'objects_documentation': objects_documentation
+    })
 
-  # control flow - route based on scenario
-  if scenario == 'A':
-      # Scenario A needs key assumptions added
-      next_tool_name = 'add_assumptions'
-  else:
-      # Scenarios B, C, D - check if memory management needed
-      tokens_chat_history = calculate_chat_history_tokens(state['messages_log'])
-      if tokens_chat_history >= 1000 and len(state['messages_log']) > 4:
-          next_tool_name = 'manage_memory_chat_history'
-      else:
-          next_tool_name = END
+    if result['next_step'] == 'Continue':
+        scenario = ''
+        next_tool_name = 'clarification_check'
+    elif result['next_step'] == 'B':
+        scenario = 'B'
+        agent_questions = generate_agent_questions(state)
+        state['generate_answer_details'] = {'agent_questions': agent_questions}
+        next_tool_name = 'generate_answer'
+    else:  # C
+        scenario = 'C'
+        agent_questions = generate_agent_questions(state)
+        state['generate_answer_details'] = {'agent_questions': agent_questions}
+        next_tool_name = 'generate_answer'
 
-  action = AgentAction( tool=next_tool_name, tool_input='', log = '' )
-  state['intermediate_steps'].append(action)
+    # Update state
+    state['scenario'] = scenario
 
-  return state
+    # Log orchestrator run
+    action = AgentAction(tool='orchestrator', tool_input='', log='tool ran successfully')
+    state['intermediate_steps'].append(action)
 
-@tool
-def manage_memory_chat_history(state:State):
-    """ Manages the chat history so that it does not become too large in terms of output tokens.
-    Summarizes older messages and keeps just the last 4 pairs of human prompts and AI responses. """
-
-    # Summarize older messages and keep last 4
-    message_history_to_summarize = [msg.content for msg in state['messages_log'][:-4]]
-    prompt = create_prompt_template('user', 'Distill the below chat messages into a single summary paragraph.The summary paragraph should have maximum 400 tokens.Include as many specific details as you can.Chat messages:{message_history_to_summarize}')
-    runnable = prompt | llm_fast # use the cheap model
-    chat_history_summary = runnable.invoke({'message_history_to_summarize':message_history_to_summarize})
-    last_4_messages = state['messages_log'][-4:]
-    state['messages_log'] = [chat_history_summary] +[*last_4_messages]
-
-    # log manage_memory_chat_history run
-    action = AgentAction(tool='manage_memory_chat_history', tool_input='', log = 'tool ran successfully')
+    # Control flow
+    action = AgentAction(tool=next_tool_name, tool_input='', log='')
     state['intermediate_steps'].append(action)
 
     return state
 
-class ScenarioBC(TypedDict):
-  ''' indication of the next step to be performed by the agent '''
-  next_step: Annotated[Literal["B", "C","Continue"],"indication of the next step to be performed by the agent"]
 
 @tool
-def clarification_check(state:State):
-  ''' Determines if question is clear (scenario A) or ambiguous (scenario D) '''
+def clarification_check(state: State):
+    """Determines if question is clear (scenario A) or ambiguous (scenario D)"""
 
-  sys_prompt_clear_or_ambiguous = """Decide whether the user question is clear or ambigous based on this specific database schema:
+    sys_prompt = """Decide whether the user question is clear or ambigous based on this specific database schema:
   {objects_documentation}.
 
   Conversation history:
@@ -888,9 +234,6 @@ def clarification_check(state:State):
 
   - You can deduct the analytical intent from the conversation history.
 
-  - User questions with terms referring to a single related term are CLEAR. See here: {available_term_mappings}.
-    Example: "A is related (similar but different) with: B".
-
   *** The question is AMBIGUOUS if ***
   - Different source columns would give different insights.
 
@@ -902,97 +245,39 @@ def clarification_check(state:State):
   If AMBIGUOUS -> "AMBIGUOUS".
   """
 
-  # Prepare common input data
-  search_terms_output = state['search_terms_output']
+    prompt = ChatPromptTemplate.from_messages([('user', sys_prompt)])
+    chain = prompt | llm.with_structured_output(ClearOrAmbiguous)
 
-  input_data = {
-        'objects_documentation': state['objects_documentation'],
-        'question': state['current_question'],
+    result = chain.invoke({
         'messages_log': extract_msg_content_from_history(state['messages_log']),
-        'available_term_mappings': search_terms_output.get('documentation', 'None')
-   }
+        'question': state['current_question'],
+        'objects_documentation': objects_documentation
+    })
 
-  # Check for scenario D: multiple related terms exist and related_term_searched_for does not exist in DB
-  related_terms_data = search_terms_output.get('related_terms')
+    # Determine next step based on result
+    if result['analytical_intent_clearness'] == 'CLEAR':
+        state['scenario'] = 'A'
+        next_tool_name = 'query_genie'
+    else:  # AMBIGUOUS
+        state['scenario'] = 'D'
+        next_tool_name = 'clarification'
 
+    # Log clarification_check run
+    action = AgentAction(tool='clarification_check', tool_input='', log='tool ran successfully')
+    state['intermediate_steps'].append(action)
 
-  # Check if: related_terms exists, has multiple matches, and the searched_for term doesn't exist in DB
-  if related_terms_data and len(related_terms_data.get('matches', [])) > 1:
-      searched_for_exists_in_db = False
-      # Check if searched_for term exists in key_terms
-      searched_for_lower = related_terms_data.get('searched_for', '').lower()
-      for term in search_terms_output.get('key_terms', []):
-          if term.get('name', '').lower() == searched_for_lower:
-              searched_for_exists_in_db = True
-              break
+    # Control flow
+    action = AgentAction(tool=next_tool_name, tool_input='', log='')
+    state['intermediate_steps'].append(action)
 
+    return state
 
-      if not searched_for_exists_in_db:
-          # Scenario D triggered
-          related_term_name = related_terms_data.get('searched_for', '')
-          related_term_definition = related_terms_data.get('definition', '')
-          related_terms_list = related_terms_data.get('matches', [])
-
-          # Create ambiguity_explanation based on whether the searched term has a definition
-          if related_term_definition != '':
-              ambiguity_explanation = f"The term {related_term_name} is not available in the tables I have access to, but related terms are available."
-          else:
-              ambiguity_explanation = f"The term {related_term_name} can mean multiple things."
-
-          # Create agent_questions from related_terms
-          agent_questions_list = []
-          for rel_term in related_terms_list:
-              rel_name = rel_term.get('name', '')
-              rel_def = rel_term.get('definition', '')
-              if rel_def:
-                  agent_questions_list.append(f"{rel_name}: {rel_def}")
-              else:
-                  agent_questions_list.append(f"{rel_name}")
-
-          # Format as "Which option are you interested in? - option1. - option2..."
-          agent_questions_formatted = "Which option are you interested in? " + " ".join([f"- {q}." for q in agent_questions_list])
-
-          # Update state
-          tool_name = 'clarification'
-          state['scenario'] = 'D'
-          state['analytical_intent'] = []
-          state['generate_answer_details']['ambiguity_explanation'] = ambiguity_explanation
-          state['generate_answer_details']['agent_questions'] = [agent_questions_formatted]
-
-          # control flow
-          action = AgentAction(tool='clarification_check', tool_input='', log='tool ran successfully')
-          state['intermediate_steps'].append(action)
-          state['intermediate_steps'].append(AgentAction(tool=tool_name, tool_input='', log=''))
-
-          return state
-
-  # No scenario D trigger - use LLM to determine if clear or ambiguous
-  prompt_clear_or_ambiguous = create_prompt_template('system', sys_prompt_clear_or_ambiguous)
-  chain = prompt_clear_or_ambiguous | llm.with_structured_output(ClearOrAmbiguous)
-  result = chain.invoke(input_data)
-
-  # Based on result, route appropriately
-  if result['analytical_intent_clearness'] == "CLEAR":
-      # Clear - set scenario A and route to extract_analytical_intent
-      state['scenario'] = 'A'
-      tool_name = 'extract_analytical_intent'
-  else:
-      # Ambiguous - route to clarification (scenario D will be set there)
-      tool_name = 'clarification'
-
-  # control flow
-  action = AgentAction(tool='clarification_check', tool_input='', log='tool ran successfully')
-  state['intermediate_steps'].append(action)
-  state['intermediate_steps'].append(AgentAction(tool=tool_name, tool_input='', log=''))
-
-  return state
 
 @tool
-def clarification(state:State):
-  ''' Generates ambiguity analysis when question is ambiguous (scenario D) '''
+def clarification(state: State):
+    """Generates ambiguity analysis when question is ambiguous (scenario D)"""
 
-  sys_prompt_ambiguous = """
-  The latest user question is ambiguous based on the following database schema:
+    sys_prompt = """The latest user question is ambiguous based on the following database schema:
   {objects_documentation}.
 
   Here is the conversation history with the user:
@@ -1025,289 +310,317 @@ def clarification(state:State):
   Use simple, non-technical language. Be concise.
   """
 
-  # Prepare input data
-  search_terms_output = state['search_terms_output']
+    prompt = ChatPromptTemplate.from_messages([('user', sys_prompt)])
+    chain = prompt | llm.with_structured_output(AmbiguityAnalysis)
 
-  input_data = {
-        'objects_documentation': state['objects_documentation'],
+    result = chain.invoke({
+        'messages_log': extract_msg_content_from_history(state['messages_log']),
         'question': state['current_question'],
-        'messages_log': extract_msg_content_from_history(state['messages_log'])
-   }
+        'objects_documentation': objects_documentation
+    })
 
-  # Generate ambiguity analysis
-  prompt_ambiguous = create_prompt_template('system', sys_prompt_ambiguous)
-  chain = prompt_ambiguous | llm.with_structured_output(AmbiguityAnalysis)
-  result = chain.invoke(input_data)
+    # Update state (scenario D already set by clarification_check)
+    state['generate_answer_details'] = {
+        'ambiguity_explanation': result['ambiguity_explanation'],
+        'agent_questions': result['agent_questions']
+    }
 
-  # Update state
-  state['scenario'] = 'D'
-  state['analytical_intent'] = result['agent_questions']
-  state['generate_answer_details']['ambiguity_explanation'] = result['ambiguity_explanation']
-  state['generate_answer_details']['agent_questions'] = result['agent_questions']
+    # Log clarification run
+    action = AgentAction(tool='clarification', tool_input='', log='tool ran successfully')
+    state['intermediate_steps'].append(action)
 
-  # control flow
-  action = AgentAction(tool='clarification', tool_input='', log='tool ran successfully')
-  state['intermediate_steps'].append(action)
-  state['intermediate_steps'].append(AgentAction(tool='generate_answer', tool_input='', log=''))
+    # Control flow - go to generate_answer
+    action = AgentAction(tool='generate_answer', tool_input='', log='')
+    state['intermediate_steps'].append(action)
 
-  return state
+    return state
+
 
 @tool
-def add_assumptions(state:State):
-  ''' Generates key assumptions and appends them to the answer for transparency (only called for scenario A) '''
-
-  key_assumptions = []
-
-  # Generate query explanations for each executed query
-  for query_data in state['current_sql_queries']:
-      if query_data.get('query'):
-          explanation = create_query_explanation(query_data['query'])
-          if explanation.get('explanation') and isinstance(explanation['explanation'], list):
-              key_assumptions.extend(explanation['explanation'])
-
-  # Add key assumptions from term substitutions
-  assumptions_output = add_key_assumptions_from_term_substitutions(state['search_terms_output'])
-  if assumptions_output.get('key_assumptions'):
-      key_assumptions.extend(assumptions_output['key_assumptions'])
-
-  # Store in state
-  state['generate_answer_details']['key_assumptions'] = key_assumptions
-
-  # Format and append to llm_answer
-  key_assumptions_section = format_key_assumptions_for_prompt(key_assumptions)
-
-  if key_assumptions_section:
-      current_content = state['llm_answer'].content
-      content_key_assumptions = current_content + key_assumptions_section
-
-      # Replace llm_answer with updated answer, as well as the AI answer in the messages log
-      ai_msg = AIMessage(content=content_key_assumptions)
-      state['llm_answer'] = ai_msg
-      state['messages_log'][-1] = ai_msg
-
-  # log add assumptions run
-  action = AgentAction(tool='add_assumptions', tool_input='', log = 'tool ran successfully')
-  state['intermediate_steps'].append(action)
-
-  # control flow - check if memory management needed
-  tokens_chat_history = calculate_chat_history_tokens(state['messages_log'])
-  if tokens_chat_history >= 1000 and len(state['messages_log']) > 4:
-      next_tool_name = 'manage_memory_chat_history'
-  else:
-      next_tool_name = END
-
-  action = AgentAction( tool=next_tool_name, tool_input='', log = '' )
-  state['intermediate_steps'].append(action)
-
-  return state
-
-def orchestrator(state:State):
-  ''' Orchestrator deciding if the user question requires querying the database or is asking for info not available '''
-
-  system_prompt = f"""You are a decision support consultant helping users make data-driven decisions.
-
-    Your task is to decide the next action for this question: {{question}}.
-
-    Conversation history: {{messages_log}}. 
-    Current insights: "{{insights}}".
-    Database schema: {{objects_documentation}}
-
-    Decision process:  
-
-    Step 1. Check if question is non-analytical or already answered:
-       - If question is just pleasantries ("thank you", "hello", "how are you") → "B"
-       - If the same question was already answered in conversation history → "B"
-
-    Step 2. Check if requested data exists in schema:
-      - If the user asks for data/metrics not available AND no synonyms or related terms exist in the database schema → "C"
-    
-    Step 3. Otherwise → "Continue".
+def query_genie(state: State):
     """
-  prompt = create_prompt_template('system', system_prompt)
-  chain = prompt | llm_fast.with_structured_output(ScenarioBC)
-  result = chain.invoke({'messages_log':extract_msg_content_from_history(state['messages_log']),
-                         'question': state['current_question'], 
-                         'insights': format_sql_query_results_for_prompt(state['current_sql_queries']),
-                         'objects_documentation':state['objects_documentation']
-                         })   
-  if result['next_step'] == 'Continue':
-    scenario = ''  
-    agent_questions = None
-    next_tool_name = 'clarification_check'
-    pass
-
-  # if scenario B, set the scenario in the state and log the generate_answer as next step
-  elif result['next_step'] == 'B':
-    scenario = result['next_step']
-    agent_questions = None
-    next_tool_name = 'generate_answer'
-
-  # if scenario C, set the scenario in the state and log the generate_answer as next step
-  else:
-    scenario = result['next_step']
-    agent_questions = None
-    next_tool_name = 'generate_answer'
-
-  # update state
-  state['scenario'] = scenario
-  state['generate_answer_details']['agent_questions'] = agent_questions    
-
-  # log orchestrator run
-  action = AgentAction(tool='orchestrator', tool_input='', log = 'tool ran successfully')
-  state['intermediate_steps'].append(action)  
-
-  # control flow
-  action = AgentAction( tool=next_tool_name, tool_input='', log = '' )
-  state['intermediate_steps'].append(action)  
-  return state     
-
-# run the nodes
-
-def run_control_flow(state:State):
-    ''' Based on the last tool name stored in intermediate_steps (generated by the orchestrator), it executes the next node that will trigger the control flow '''
-
-    # get the next tool to execute by looking in the last tool_name in the intermediate steps
-    tool_name = state['intermediate_steps'][-1].tool
-
-    # clarification_check
-    if tool_name == 'clarification_check':
-      state = clarification_check.invoke({'state':state})
-
-    # extract_analytical_intent
-    elif tool_name == 'extract_analytical_intent':
-      state = extract_analytical_intent.invoke({'state':state})
-
-    # clarification
-    elif tool_name == 'clarification':
-      state = clarification.invoke({'state':state})
-
-    # creating sql queries
-    elif tool_name == 'create_sql_query_or_queries':
-      state = create_sql_query_or_queries.invoke({'state':state})
-
-    # executing sql queries
-    elif tool_name == 'execute_sql_query':
-      state = execute_sql_query.invoke({'state':state})
-
-    # generate answer
-    elif tool_name == 'generate_answer':
-      state = generate_answer.invoke({'state':state})
-
-    # add assumptions
-    elif tool_name == 'add_assumptions':
-      state = add_assumptions.invoke({'state':state})
-
-    # manage memory chat history
-    elif tool_name == 'manage_memory_chat_history':
-      state = manage_memory_chat_history.invoke({'state':state})
-
-    return state
-  
-# assemble graph
-
-def add_key_terms_to_objects_documentation(base_documentation: str, search_terms_output: dict) -> str:
+    Query Genie with the user's question
+    Replaces extract_analytical_intent, create_sql, and execute_sql nodes
     """
-    Adds relevant key terms section to the base objects documentation.
+    user_question = state['current_question']
 
-    Args:
-        base_documentation: Base documentation string (tables, relationships, date ranges)
-        search_terms_output: Output from search_terms() function containing relevant terms
+    # Query Genie
+    genie_result = query_genie_api(GENIE_SPACE_ID, user_question)
 
-    Returns:
-        Complete documentation string with key terms section added
-    """
-    # Build custom Key Terms section with only relevant terms
-    key_terms_text = "\nKey Terms:\n"
-    for term in search_terms_output['key_terms']:
-        term_name = term.get('name', '')
-        term_definition = term.get('definition', '')
-        query_instructions = term.get('query_instructions', '')
-
-        if term_definition:
-            key_terms_text += f"  - {term_name}: {term_definition}\n"
-        else:
-            key_terms_text += f"  - {term_name}\n"
-
-        if query_instructions:
-            key_terms_text += f"    {query_instructions}\n"
-
-    # Append documentation if exists
-    if search_terms_output.get('documentation'):
-        key_terms_text += f"\n{search_terms_output['documentation']}\n"
-
-    # Combine everything
-    return base_documentation + key_terms_text
-
-# function to reset the state current queries (to add in the start of graph execution)
-def reset_state(state:State):
-    state['current_sql_queries'] = []
-    state['intermediate_steps'] = []
-    state['llm_answer'] = AIMessage(content='')
-    state['generate_answer_details'] = {
-        'key_assumptions': [],
-        'agent_questions': [],
-        'ambiguity_explanation': ''
+    # Populate current_sql_queries with Genie result
+    # Structure: {'query': str, 'explanation': str, 'result': str}
+    sql_query_entry = {
+        'query': genie_result.get('generated_sql', ''),
+        'explanation': genie_result.get('query_description', ''),  # Genie's interpretation
+        'result': genie_result.get('sql_result').to_string() if genie_result.get('sql_result') is not None else ''
     }
-    state['analytical_intent'] = []
-    state['scenario'] = ''
+    state['current_sql_queries'].append(sql_query_entry)
 
-    # Call search_terms to get relevant terms for this question
-    search_terms_output = search_terms(state['current_question'], key_terms, synonyms, related_terms)
-    search_terms_output['term_substitutions'] = []  # Will be populated in extract_analytical_intent
-    state['search_terms_output'] = search_terms_output
+    # Log query_genie run
+    action = AgentAction(tool='query_genie', tool_input=user_question, log='tool ran successfully')
+    state['intermediate_steps'].append(action)
 
-    # Add relevant key terms to the base objects_documentation
-    state['objects_documentation'] = add_key_terms_to_objects_documentation(objects_documentation, search_terms_output)
+    # Control flow - go to generate_answer
+    action = AgentAction(tool='generate_answer', tool_input='', log='')
+    state['intermediate_steps'].append(action)
 
-    state['sql_dialect'] = sql_dialect
     return state
 
-def router(state:State):
-    # returns the tool name to use
+
+@tool
+def add_assumptions(state: State):
+    """Add key assumptions to the answer for transparency (scenario A only)"""
+
+    key_assumptions = []
+
+    # Generate assumptions from SQL queries using create_query_explanation
+    for query_data in state['current_sql_queries']:
+        if query_data.get('query'):
+            explanation = create_query_explanation(query_data['query'])
+            if explanation.get('explanation') and isinstance(explanation['explanation'], list):
+                key_assumptions.extend(explanation['explanation'])
+
+    # Store key_assumptions in generate_answer_details
+    if 'generate_answer_details' not in state:
+        state['generate_answer_details'] = {}
+    state['generate_answer_details']['key_assumptions'] = key_assumptions
+
+    # Format assumptions section
+    def format_key_assumptions_for_prompt(key_assumptions: list[str]) -> str:
+        """Format key assumptions into single section"""
+        if not key_assumptions:
+            return ""
+        unique_assumptions = list(dict.fromkeys(key_assumptions))
+        return "\n\n**Key Assumptions:**\n" + "\n".join([f"• {a}" for a in unique_assumptions])
+
+    key_assumptions_section = format_key_assumptions_for_prompt(key_assumptions)
+
+    if key_assumptions_section:
+        current_content = state['llm_answer'].content
+        content_with_assumptions = current_content + key_assumptions_section
+
+        # Replace llm_answer with updated answer, as well as the AI answer in the messages log
+        ai_msg = AIMessage(content=content_with_assumptions)
+        state['llm_answer'] = ai_msg
+        state['messages_log'][-1] = ai_msg
+
+    # Log add_assumptions run
+    action = AgentAction(tool='add_assumptions', tool_input='', log='tool ran successfully')
+    state['intermediate_steps'].append(action)
+
+    # Control flow - go to END
+    action = AgentAction(tool=END, tool_input='', log='')
+    state['intermediate_steps'].append(action)
+
+    return state
+
+
+@tool
+def generate_answer(state: State):
+    """generates the AI answer taking into consideration the explanation and the result of the sql query that was executed"""
+    scenario = state['scenario']
+
+    # Scenario-specific prompts (from original agent.py)
+    if scenario == 'A':
+        # Data query scenario - use SQL query results
+        sys_prompt = """You are a decision support consultant helping users become more data-driven.
+Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
+
+Here is the conversation history with the user:
+{messages_log}.
+Latest user message:
+{question}.
+- Use the raw SQL results below to form your answer: {query_results}.
+- Don't assume facts that are not backed up by the data.
+- Include all details from these results.
+- Suggest these next steps for the user: {agent_questions}.
+
+Response guidelines:
+  - Respond in clear, non-technical language.
+  - Be concise.
+  - Keep it simple and conversational.
+  - If the question is smart, reinforce the user's question to build confidence.
+    Example: "Great instinct to ask that - it's how data-savvy pros think!"
+  - Ask the user which option they prefer from your suggested next steps.
+  - Use warm, supportive closing that makes the user feel good.
+    Example: "Keep up the great work!", "Have a great day ahead!"
+"""
+
+        # Generate agent questions for next steps
+        agent_questions = generate_agent_questions(state)
+
+        # Store in generate_answer_details
+        state['generate_answer_details'] = {'agent_questions': agent_questions}
+
+        invoke_params = {
+            'messages_log': state['messages_log'],
+            'question': state['current_question'],
+            'query_results': format_sql_query_results_for_prompt(state['current_sql_queries']),
+            'agent_questions': agent_questions
+        }
+
+    elif scenario == 'B':
+        # Pleasantries scenario
+        sys_prompt = """You are a decision support consultant helping users become more data-driven.
+Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
+
+Here is the conversation history with the user:
+{messages_log}.
+
+Latest user message:
+{question}.
+
+- Suggest these next steps for the user: {agent_questions}
+
+Response guidelines:
+  - Respond in clear, non-technical language.
+  - Be concise.
+  - Keep it simple and conversational.
+  - Ask the user which option they prefer from your suggested next steps."""
+
+        invoke_params = {
+            'messages_log': state['messages_log'],
+            'question': state['current_question'],
+            'agent_questions': state.get('generate_answer_details', {}).get('agent_questions', [])
+        }
+
+    elif scenario == 'C':
+        # Data unavailable scenario
+        sys_prompt = """You are a decision support consultant helping users become more data-driven.
+Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
+
+Here is the conversation history with the user:
+{messages_log}.
+
+Latest user message:
+{question}.
+
+Unfortunately, the requested information from last prompt is not available in our database.
+
+- Suggest these next steps for the user: {agent_questions}.
+
+Response guidelines:
+  - Respond in clear, non-technical language.
+  - Be concise.
+  - Keep it simple and conversational.
+  - Ask the user which option they prefer from your suggested next steps."""
+
+        invoke_params = {
+            'messages_log': state['messages_log'],
+            'question': state['current_question'],
+            'agent_questions': state.get('generate_answer_details', {}).get('agent_questions', [])
+        }
+
+    else:  # scenario == 'D'
+        # Ambiguous question scenario
+        sys_prompt = """You are a decision support consultant helping users become more data-driven.
+Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
+
+Here is the conversation history with the user:
+{messages_log}.
+
+Latest user message:
+{question}.
+
+The last user prompt could be interpreted in multiple ways.
+Explain the user this ambiguity reason: {ambiguity_explanation}.
+And ask user to specify which of these analysis it wants: {agent_questions}.
+Respond in clear, non-technical language.
+Be concise.
+Keep it simple and conversational."""
+
+        invoke_params = {
+            'messages_log': state['messages_log'],
+            'question': state['current_question'],
+            'ambiguity_explanation': state.get('generate_answer_details', {}).get('ambiguity_explanation', ''),
+            'agent_questions': state.get('generate_answer_details', {}).get('agent_questions', [])
+        }
+
+    # Generate response
+    prompt = ChatPromptTemplate.from_messages([
+        MessagesPlaceholder("messages_log"),
+        ('user', sys_prompt)
+    ])
+    llm_answer_chain = prompt | llm
+    ai_msg = llm_answer_chain.invoke(invoke_params)
+
+    # Update state
+    state['llm_answer'] = ai_msg
+    state['messages_log'].append(HumanMessage(state['current_question']))
+    state['messages_log'].append(ai_msg)
+
+    # Log generate_answer run
+    action = AgentAction(tool='generate_answer', tool_input='', log='tool ran successfully')
+    state['intermediate_steps'].append(action)
+
+    # Control flow - add_assumptions if scenario A, otherwise END
+    if state['scenario'] == 'A':
+        next_tool_name = 'add_assumptions'
+    else:
+        next_tool_name = END
+
+    action = AgentAction(tool=next_tool_name, tool_input='', log='')
+    state['intermediate_steps'].append(action)
+
+    return state
+
+# control flow 
+
+def router(state: State):
+    """Router based on last intermediate step"""
     return state['intermediate_steps'][-1].tool
 
-graph= StateGraph(State)
-graph.add_node("reset_state",reset_state)
-graph.add_node("orchestrator",orchestrator)
-graph.add_node("clarification_check",run_control_flow)
-graph.add_node("extract_analytical_intent",run_control_flow)
-graph.add_node("clarification",run_control_flow)
-graph.add_node("create_sql_query_or_queries",run_control_flow)
-graph.add_node("execute_sql_query",run_control_flow)
-graph.add_node("generate_answer",run_control_flow)
-graph.add_node("add_assumptions",run_control_flow)
-graph.add_node("manage_memory_chat_history",run_control_flow)  # NEW
 
-# Starting the agent
-graph.add_edge(START,"reset_state")
-graph.add_edge("reset_state","orchestrator")
+def run_control_flow(state: State):
+    """Execute the node indicated by the last intermediate step"""
+    tool_name = state['intermediate_steps'][-1].tool
 
-# Orchestrator routes to clarification_check or generate_answer (B/C scenarios)
-graph.add_conditional_edges(source='orchestrator',path=router)
+    if tool_name == 'clarification_check':
+        state = clarification_check.invoke({'state': state})
+    elif tool_name == 'clarification':
+        state = clarification.invoke({'state': state})
+    elif tool_name == 'query_genie':
+        state = query_genie.invoke({'state': state})
+    elif tool_name == 'add_assumptions':
+        state = add_assumptions.invoke({'state': state})
+    elif tool_name == 'generate_answer':
+        state = generate_answer.invoke({'state': state})
 
-# Clarification_check routes to extract_analytical_intent or clarification
-graph.add_conditional_edges(source='clarification_check',path=router)
+    return state
 
-# Extract_analytical_intent routes to create_sql_query_or_queries
-graph.add_conditional_edges(source='extract_analytical_intent',path=router)
 
-# Create_sql_query_or_queries routes to execute_sql_query
-graph.add_edge("create_sql_query_or_queries","execute_sql_query")
+# Build the graph
+graph = StateGraph(State)
 
-# Execute_sql_query routes to generate_answer
-graph.add_conditional_edges(source='execute_sql_query',path=router)
+# Add nodes
+graph.add_node("orchestrator", orchestrator)
+graph.add_node("clarification_check", run_control_flow)
+graph.add_node("clarification", run_control_flow)
+graph.add_node("query_genie", run_control_flow)
+graph.add_node("add_assumptions", run_control_flow)
+graph.add_node("generate_answer", run_control_flow)
 
-# Clarification routes to generate_answer
-graph.add_edge("clarification","generate_answer")
+# Add edges
+graph.add_edge(START, "orchestrator")
 
-# Generate_answer routes conditionally: scenario A → add_assumptions, else → manage_memory_chat_history
-graph.add_conditional_edges(source='generate_answer',path=router)
+# Orchestrator routes to clarification_check or generate_answer
+graph.add_conditional_edges(source='orchestrator', path=router)
 
-# Add_assumptions routes to manage_memory_chat_history
-graph.add_conditional_edges(source='add_assumptions',path=router)
+# clarification_check routes to query_genie or clarification
+graph.add_conditional_edges(source='clarification_check', path=router)
 
-# Manage_memory_chat_history is the final node
-graph.add_edge("manage_memory_chat_history",END)
+# clarification routes to generate_answer
+graph.add_conditional_edges(source='clarification', path=router)
 
-memory = MemorySaver()
-graph = graph.compile(checkpointer=memory)
+# query_genie routes to generate_answer
+graph.add_conditional_edges(source='query_genie', path=router)
+
+# generate_answer routes to add_assumptions (scenario A) or END (other scenarios)
+graph.add_conditional_edges(source='generate_answer', path=router)
+
+# add_assumptions routes to END
+graph.add_conditional_edges(source='add_assumptions', path=router)
+
+# Compile graph with checkpointer for memory
+checkpointer = MemorySaver()
+agent = graph.compile(checkpointer=checkpointer)

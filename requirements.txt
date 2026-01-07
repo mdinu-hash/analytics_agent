@@ -1,24 +1,21 @@
-streamlit==1.46.0
+# LangChain Core
 langchain==0.3.25
-langchain-community==0.3.23
 langchain-core==0.3.59
-langchain-openai==0.3.14
-langchain-anthropic
-langchain-text-splitters==0.3.8
+langchain-community
+
+# LangGraph
 langgraph==0.3.34
 langgraph-checkpoint==2.0.25
-langgraph-prebuilt==0.1.8
-langgraph-sdk==0.1.63
-langsmith==0.3.42
-openai==1.77.0
+
+# Databricks SDK
+databricks-sdk
+databricks-langchain
+
+# MLflow
+mlflow
+
+# Data Processing
 pandas==2.2.3
-numpy==2.3.1
-SQLAlchemy==2.0.40
-psycopg2-binary>=2.9.0
-python-dotenv==1.1.0
-tiktoken==0.9.0
+
+# Environment & Configuration
 pydantic==2.11.3
-pydantic-settings==2.9.1
-requests==2.32.3
-PyYAML==6.0.2
-transformers
