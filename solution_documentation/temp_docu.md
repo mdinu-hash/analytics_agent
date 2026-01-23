@@ -5,7 +5,6 @@ CREATE TABLE staffingdata_raw (
     employee_name STRING,
     email STRING,
     direct_supervisor_name STRING,
-    direct_supervisor_id INTEGER,
     location STRING,
     job_title STRING,
     employee_status STRING,
@@ -62,8 +61,29 @@ BEGIN
 
     MERGE INTO staffingdata AS tgt
     USING (
+        -- Resolve direct_supervisor_name to direct_supervisor_id via self-join
+        WITH RECURSIVE raw_with_supervisor_id AS (
+            SELECT
+                r.cfn_person_id,
+                r.week,
+                r.employee_name,
+                r.email,
+                r.direct_supervisor_name,
+                sup.cfn_person_id AS direct_supervisor_id,
+                r.job_title,
+                r.employee_status,
+                r.contractor,
+                r.location,
+                r.financial_business_unit,
+                r.financial_department
+            FROM staffingdata_raw r
+            LEFT JOIN staffingdata_raw sup
+                ON LOWER(TRIM(r.direct_supervisor_name)) = LOWER(TRIM(sup.employee_name))
+                AND r.week = sup.week
+        ),
+
         -- Build employee_path using recursive CTE
-        WITH RECURSIVE supervisor_chain AS (
+        supervisor_chain AS (
             -- Anchor: Start with each employee, first level is their direct supervisor
             SELECT
                 cfn_person_id,
@@ -71,7 +91,7 @@ BEGIN
                 direct_supervisor_id AS current_supervisor_id,
                 COALESCE(CAST(direct_supervisor_id AS VARCHAR), '') AS employee_path,
                 1 AS lvl
-            FROM staffingdata_raw
+            FROM raw_with_supervisor_id
 
             UNION ALL
 
@@ -83,7 +103,7 @@ BEGIN
                 sc.employee_path || ' | ' || CAST(r.direct_supervisor_id AS VARCHAR) AS employee_path,
                 sc.lvl + 1
             FROM supervisor_chain sc
-            INNER JOIN staffingdata_raw r
+            INNER JOIN raw_with_supervisor_id r
                 ON sc.current_supervisor_id = r.cfn_person_id
                 AND sc.week = r.week
             WHERE sc.current_supervisor_id IS NOT NULL
@@ -121,7 +141,7 @@ BEGIN
                 r.financial_department,
                 COALESCE(fp.employee_path, '') AS employee_path,
                 CURRENT_TIMESTAMP() AS insert_date
-            FROM staffingdata_raw r
+            FROM raw_with_supervisor_id r
             LEFT JOIN final_paths fp
                 ON r.cfn_person_id = fp.cfn_person_id
                 AND r.week = fp.week
