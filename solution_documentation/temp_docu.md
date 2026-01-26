@@ -82,32 +82,31 @@ BEGIN
                 AND r.week = sup.week
         ),
 
-        -- Build employee_path using recursive CTE
+        -- Build employee_path using recursive CTE (format: own_id|supervisor_id|supervisor's_supervisor_id|...)
         supervisor_chain AS (
-            -- Anchor: Start with each employee, first level is their direct supervisor
+            -- Anchor: Start with each employee's own ID
             SELECT
                 cfn_person_id,
                 week,
                 direct_supervisor_id AS current_supervisor_id,
-                COALESCE(CAST(direct_supervisor_id AS VARCHAR), '') AS employee_path,
+                CAST(cfn_person_id AS VARCHAR) AS employee_path,
                 1 AS lvl
             FROM raw_with_supervisor_id
 
             UNION ALL
 
-            -- Recursive: Walk up the chain - find supervisor's supervisor
+            -- Recursive: Walk up the chain - append supervisor IDs
             SELECT
                 sc.cfn_person_id,
                 sc.week,
                 r.direct_supervisor_id AS current_supervisor_id,
-                sc.employee_path || ' | ' || CAST(r.direct_supervisor_id AS VARCHAR) AS employee_path,
+                sc.employee_path || '|' || CAST(r.cfn_person_id AS VARCHAR) AS employee_path,
                 sc.lvl + 1
             FROM supervisor_chain sc
             INNER JOIN raw_with_supervisor_id r
                 ON sc.current_supervisor_id = r.cfn_person_id
                 AND sc.week = r.week
             WHERE sc.current_supervisor_id IS NOT NULL
-              AND r.direct_supervisor_id IS NOT NULL
               AND sc.lvl < 20  -- Safety limit to prevent infinite loops
         ),
 
