@@ -224,3 +224,149 @@ CALL usp_load_staffingdata();
 -- 3. Verify results
 SELECT * FROM staffingdata ORDER BY week DESC, cfn_person_id;
 ```
+
+---
+
+# Swipes PTO Data
+
+## Tables
+
+```sql
+-- =============================================================
+-- RAW TABLE: swipesptoraw
+-- =============================================================
+CREATE TABLE swipesptoraw (
+    cfn_person_id INTEGER,
+    week_begin DATE,
+    date DATE,
+    time TIME,
+    single_cinci_credit NUMERIC,
+    pto_in_office_credit NUMERIC
+);
+
+-- =============================================================
+-- DESTINATION TABLE: swipespto
+-- =============================================================
+CREATE TABLE swipespto (
+    record_key INTEGER,
+    employee_key INTEGER,
+    swipe_date DATE,
+    swipe_time TIME,
+    single_cinci_credit NUMERIC,
+    pto_in_office_credit NUMERIC,
+    insert_date DATETIME
+);
+
+-- Sequence for generating record_key
+CREATE SEQUENCE IF NOT EXISTS seq_swipe_record_key START = 1 INCREMENT = 1;
+```
+
+---
+
+## Load Procedure
+
+```sql
+-- =============================================================
+-- STORED PROCEDURE: sp_swipespto_insert
+-- =============================================================
+CREATE OR REPLACE PROCEDURE sp_swipespto_insert()
+RETURNS VARCHAR
+LANGUAGE SQL
+AS
+$$
+BEGIN
+
+    -- =============================================================
+    -- MERGE: Upsert from raw into destination
+    -- Lookup employee_key from staffingdata using point-in-time join
+    -- Key: (employee_key, swipe_date, swipe_time)
+    -- =============================================================
+
+    MERGE INTO swipespto AS tgt
+    USING (
+        -- Find the correct employee_key by matching cfn_person_id
+        -- and finding the highest week in staffingdata <= swipe date
+        WITH swipes_with_employee_key AS (
+            SELECT
+                r.cfn_person_id,
+                r.date AS swipe_date,
+                r.time AS swipe_time,
+                r.single_cinci_credit,
+                r.pto_in_office_credit,
+                s.employee_key,
+                ROW_NUMBER() OVER (
+                    PARTITION BY r.cfn_person_id, r.date, r.time
+                    ORDER BY s.week DESC
+                ) AS rn
+            FROM swipesptoraw r
+            LEFT JOIN staffingdata s
+                ON r.cfn_person_id = s.cfn_person_id
+                AND s.week <= r.date
+        ),
+
+        source_data AS (
+            SELECT
+                employee_key,
+                swipe_date,
+                swipe_time,
+                single_cinci_credit,
+                pto_in_office_credit,
+                CURRENT_TIMESTAMP() AS insert_date
+            FROM swipes_with_employee_key
+            WHERE rn = 1
+        )
+
+        SELECT * FROM source_data
+
+    ) AS src
+
+    ON tgt.employee_key = src.employee_key
+       AND tgt.swipe_date = src.swipe_date
+       AND tgt.swipe_time = src.swipe_time
+
+    -- UPDATE existing records
+    WHEN MATCHED THEN UPDATE SET
+        tgt.single_cinci_credit = src.single_cinci_credit,
+        tgt.pto_in_office_credit = src.pto_in_office_credit,
+        tgt.insert_date = src.insert_date
+
+    -- INSERT new records
+    WHEN NOT MATCHED THEN INSERT (
+        record_key,
+        employee_key,
+        swipe_date,
+        swipe_time,
+        single_cinci_credit,
+        pto_in_office_credit,
+        insert_date
+    ) VALUES (
+        seq_swipe_record_key.NEXTVAL,
+        src.employee_key,
+        src.swipe_date,
+        src.swipe_time,
+        src.single_cinci_credit,
+        src.pto_in_office_credit,
+        src.insert_date
+    );
+
+    RETURN 'Swipes PTO load completed successfully';
+
+END;
+$$;
+```
+
+---
+
+## Usage
+
+```sql
+-- 1. Load CSV into swipesptoraw via Snowsight UI
+TRUNCATE TABLE swipesptoraw;
+-- [Upload CSV via UI]
+
+-- 2. Run the load procedure
+CALL sp_swipespto_insert();
+
+-- 3. Verify results
+SELECT * FROM swipespto ORDER BY swipe_date DESC, swipe_time DESC;
+```
