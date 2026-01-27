@@ -277,61 +277,30 @@ $$
 BEGIN
 
     -- =============================================================
-    -- MERGE: Upsert from raw into destination
-    -- Lookup employee_key from staffingdata using point-in-time join
-    -- Key: (employee_key, swipe_date, swipe_time)
+    -- Step 1: Delete existing swipes for all employee/day
+    -- combinations found in the source table
     -- =============================================================
+    DELETE FROM swipespto
+    WHERE (employee_key, swipe_date) IN (
+        SELECT DISTINCT
+            s.employee_key,
+            r.date
+        FROM swipesptoraw r
+        LEFT JOIN staffingdata s
+            ON r.cfn_person_id = s.cfn_person_id
+            AND s.week <= r.date
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY r.cfn_person_id, r.date
+            ORDER BY s.week DESC
+        ) = 1
+    );
 
-    MERGE INTO swipespto AS tgt
-    USING (
-        -- Find the correct employee_key by matching cfn_person_id
-        -- and finding the highest week in staffingdata <= swipe date
-        WITH swipes_with_employee_key AS (
-            SELECT
-                r.cfn_person_id,
-                r.date AS swipe_date,
-                r.time AS swipe_time,
-                r.single_cinci_credit,
-                r.pto_in_office_credit,
-                s.employee_key,
-                ROW_NUMBER() OVER (
-                    PARTITION BY r.cfn_person_id, r.date, r.time
-                    ORDER BY s.week DESC
-                ) AS rn
-            FROM swipesptoraw r
-            LEFT JOIN staffingdata s
-                ON r.cfn_person_id = s.cfn_person_id
-                AND s.week <= r.date
-        ),
-
-        source_data AS (
-            SELECT
-                employee_key,
-                swipe_date,
-                swipe_time,
-                single_cinci_credit,
-                pto_in_office_credit,
-                CURRENT_TIMESTAMP() AS insert_date
-            FROM swipes_with_employee_key
-            WHERE rn = 1
-        )
-
-        SELECT * FROM source_data
-
-    ) AS src
-
-    ON tgt.employee_key = src.employee_key
-       AND tgt.swipe_date = src.swipe_date
-       AND tgt.swipe_time = src.swipe_time
-
-    -- UPDATE existing records
-    WHEN MATCHED THEN UPDATE SET
-        tgt.single_cinci_credit = src.single_cinci_credit,
-        tgt.pto_in_office_credit = src.pto_in_office_credit,
-        tgt.insert_date = src.insert_date
-
-    -- INSERT new records
-    WHEN NOT MATCHED THEN INSERT (
+    -- =============================================================
+    -- Step 2: Insert all swipes from source with employee_key lookup
+    -- Lookup employee_key from staffingdata using point-in-time join
+    -- (highest week in staffingdata <= swipe date)
+    -- =============================================================
+    INSERT INTO swipespto (
         record_key,
         employee_key,
         swipe_date,
@@ -339,15 +308,32 @@ BEGIN
         single_cinci_credit,
         pto_in_office_credit,
         insert_date
-    ) VALUES (
+    )
+    SELECT
         seq_swipe_record_key.NEXTVAL,
         src.employee_key,
         src.swipe_date,
         src.swipe_time,
         src.single_cinci_credit,
         src.pto_in_office_credit,
-        src.insert_date
-    );
+        CURRENT_TIMESTAMP()
+    FROM (
+        SELECT
+            s.employee_key,
+            r.date AS swipe_date,
+            r.time AS swipe_time,
+            r.single_cinci_credit,
+            r.pto_in_office_credit,
+            ROW_NUMBER() OVER (
+                PARTITION BY r.cfn_person_id, r.date, r.time
+                ORDER BY s.week DESC
+            ) AS rn
+        FROM swipesptoraw r
+        LEFT JOIN staffingdata s
+            ON r.cfn_person_id = s.cfn_person_id
+            AND s.week <= r.date
+    ) src
+    WHERE src.rn = 1;
 
     RETURN 'Swipes PTO load completed successfully';
 
