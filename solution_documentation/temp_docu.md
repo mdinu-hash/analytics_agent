@@ -1,11 +1,11 @@
 ```sql
 CREATE TABLE staffingdata_raw (
     cfn_person_id INTEGER,
-    week DATE,
+    week_begin DATE,
     employee_name STRING,
     email STRING,
     direct_supervisor_name STRING,
-    location STRING,
+    employee_location STRING,
     job_title STRING,
     employee_status STRING,
     contractor STRING,
@@ -17,7 +17,8 @@ CREATE TABLE staffingdata (
     -- Keys
     employee_key INTEGER,
     cfn_person_id INTEGER,
-    week DATE,
+    week_begin DATE,
+    date_end DATE,
     -- Employee info
     employee_name STRING,
     email STRING,
@@ -29,7 +30,7 @@ CREATE TABLE staffingdata (
     employee_status STRING,
     contractor STRING,
     -- Organization
-    location STRING,
+    employee_location STRING,
     financial_business_unit STRING,
     financial_department STRING,
     -- Hierarchy
@@ -56,7 +57,7 @@ BEGIN
 
     -- =============================================================
     -- MERGE: Upsert from raw into destination with employee_path
-    -- Key: (week, cfn_person_id)
+    -- Key: (week_begin, cfn_person_id)
     -- =============================================================
 
     MERGE INTO staffingdata AS tgt
@@ -65,7 +66,7 @@ BEGIN
         WITH RECURSIVE raw_with_supervisor_id AS (
             SELECT
                 r.cfn_person_id,
-                r.week,
+                r.week_begin,
                 r.employee_name,
                 r.email,
                 r.direct_supervisor_name,
@@ -73,13 +74,13 @@ BEGIN
                 r.job_title,
                 r.employee_status,
                 r.contractor,
-                r.location,
+                r.employee_location,
                 r.financial_business_unit,
                 r.financial_department
             FROM staffingdata_raw r
             LEFT JOIN staffingdata_raw sup
                 ON LOWER(TRIM(r.direct_supervisor_name)) = LOWER(TRIM(sup.employee_name))
-                AND r.week = sup.week
+                AND r.week_begin = sup.week_begin
         ),
 
         -- Build employee_path using recursive CTE (format: own_id|supervisor_id|supervisor's_supervisor_id|...)
@@ -87,7 +88,7 @@ BEGIN
             -- Anchor: Start with each employee's own ID
             SELECT
                 cfn_person_id,
-                week,
+                week_begin,
                 direct_supervisor_id AS current_supervisor_id,
                 CAST(cfn_person_id AS VARCHAR) AS employee_path,
                 1 AS lvl
@@ -98,36 +99,44 @@ BEGIN
             -- Recursive: Walk up the chain - append supervisor IDs
             SELECT
                 sc.cfn_person_id,
-                sc.week,
+                sc.week_begin,
                 r.direct_supervisor_id AS current_supervisor_id,
                 sc.employee_path || '|' || CAST(r.cfn_person_id AS VARCHAR) AS employee_path,
                 sc.lvl + 1
             FROM supervisor_chain sc
             INNER JOIN raw_with_supervisor_id r
                 ON sc.current_supervisor_id = r.cfn_person_id
-                AND sc.week = r.week
+                AND sc.week_begin = r.week_begin
             WHERE sc.current_supervisor_id IS NOT NULL
               AND sc.lvl < 20  -- Safety limit to prevent infinite loops
         ),
 
-        -- Get the deepest path per employee/week (final complete path)
+        -- Get the deepest path per employee/week_begin (final complete path)
         final_paths AS (
             SELECT
                 cfn_person_id,
-                week,
+                week_begin,
                 employee_path
             FROM supervisor_chain
             QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY cfn_person_id, week
+                PARTITION BY cfn_person_id, week_begin
                 ORDER BY lvl DESC
             ) = 1
         ),
 
-        -- Join raw data with computed paths
+        -- Join raw data with computed paths and calculate date_end
         source_data AS (
             SELECT
                 r.cfn_person_id,
-                r.week,
+                r.week_begin,
+                -- date_end = next week_begin - 1 day, or 9999-12-31 if last record
+                COALESCE(
+                    DATEADD(DAY, -1, LEAD(r.week_begin) OVER (
+                        PARTITION BY r.cfn_person_id
+                        ORDER BY r.week_begin
+                    )),
+                    '9999-12-31'::DATE
+                ) AS date_end,
                 r.employee_name,
                 r.email,
                 r.direct_supervisor_name,
@@ -135,7 +144,7 @@ BEGIN
                 r.job_title,
                 r.employee_status,
                 r.contractor,
-                r.location,
+                r.employee_location,
                 r.financial_business_unit,
                 r.financial_department,
                 COALESCE(fp.employee_path, '') AS employee_path,
@@ -143,7 +152,7 @@ BEGIN
             FROM raw_with_supervisor_id r
             LEFT JOIN final_paths fp
                 ON r.cfn_person_id = fp.cfn_person_id
-                AND r.week = fp.week
+                AND r.week_begin = fp.week_begin
         )
 
         SELECT * FROM source_data
@@ -151,10 +160,11 @@ BEGIN
     ) AS src
 
     ON tgt.cfn_person_id = src.cfn_person_id
-       AND tgt.week = src.week
+       AND tgt.week_begin = src.week_begin
 
     -- UPDATE existing records (metadata may have changed)
     WHEN MATCHED THEN UPDATE SET
+        tgt.date_end = src.date_end,
         tgt.employee_name = src.employee_name,
         tgt.email = src.email,
         tgt.direct_supervisor_name = src.direct_supervisor_name,
@@ -162,7 +172,7 @@ BEGIN
         tgt.job_title = src.job_title,
         tgt.employee_status = src.employee_status,
         tgt.contractor = src.contractor,
-        tgt.location = src.location,
+        tgt.employee_location = src.employee_location,
         tgt.financial_business_unit = src.financial_business_unit,
         tgt.financial_department = src.financial_department,
         tgt.employee_path = src.employee_path,
@@ -172,7 +182,8 @@ BEGIN
     WHEN NOT MATCHED THEN INSERT (
         employee_key,
         cfn_person_id,
-        week,
+        week_begin,
+        date_end,
         employee_name,
         email,
         direct_supervisor_name,
@@ -180,7 +191,7 @@ BEGIN
         job_title,
         employee_status,
         contractor,
-        location,
+        employee_location,
         financial_business_unit,
         financial_department,
         employee_path,
@@ -188,7 +199,8 @@ BEGIN
     ) VALUES (
         seq_employee_key.NEXTVAL,
         src.cfn_person_id,
-        src.week,
+        src.week_begin,
+        src.date_end,
         src.employee_name,
         src.email,
         src.direct_supervisor_name,
@@ -196,7 +208,7 @@ BEGIN
         src.job_title,
         src.employee_status,
         src.contractor,
-        src.location,
+        src.employee_location,
         src.financial_business_unit,
         src.financial_department,
         src.employee_path,
@@ -222,7 +234,7 @@ TRUNCATE TABLE staffingdata_raw;
 CALL usp_load_staffingdata();
 
 -- 3. Verify results
-SELECT * FROM staffingdata ORDER BY week DESC, cfn_person_id;
+SELECT * FROM staffingdata ORDER BY week_begin DESC, cfn_person_id;
 ```
 
 ---
@@ -288,17 +300,13 @@ BEGIN
         FROM swipesptoraw r
         LEFT JOIN staffingdata s
             ON r.cfn_person_id = s.cfn_person_id
-            AND s.week <= r.date
-        QUALIFY ROW_NUMBER() OVER (
-            PARTITION BY r.cfn_person_id, r.date
-            ORDER BY s.week DESC
-        ) = 1
+            AND r.date BETWEEN s.week_begin AND s.date_end
     );
 
     -- =============================================================
     -- Step 2: Insert all swipes from source with employee_key lookup
-    -- Lookup employee_key from staffingdata using point-in-time join
-    -- (highest week in staffingdata <= swipe date)
+    -- Lookup employee_key from staffingdata using date range join
+    -- (swipe date between week_begin and date_end)
     -- =============================================================
     INSERT INTO swipespto (
         record_key,
@@ -311,29 +319,16 @@ BEGIN
     )
     SELECT
         seq_swipe_record_key.NEXTVAL,
-        src.employee_key,
-        src.swipe_date,
-        src.swipe_time,
-        src.single_cinci_credit,
-        src.pto_in_office_credit,
+        s.employee_key,
+        r.date AS swipe_date,
+        COALESCE(r.time, '08:00:00'::TIME) AS swipe_time,
+        r.single_cinci_credit,
+        r.pto_in_office_credit,
         CURRENT_TIMESTAMP()
-    FROM (
-        SELECT
-            s.employee_key,
-            r.date AS swipe_date,
-            r.time AS swipe_time,
-            r.single_cinci_credit,
-            r.pto_in_office_credit,
-            ROW_NUMBER() OVER (
-                PARTITION BY r.cfn_person_id, r.date, r.time
-                ORDER BY s.week DESC
-            ) AS rn
-        FROM swipesptoraw r
-        LEFT JOIN staffingdata s
-            ON r.cfn_person_id = s.cfn_person_id
-            AND s.week <= r.date
-    ) src
-    WHERE src.rn = 1;
+    FROM swipesptoraw r
+    LEFT JOIN staffingdata s
+        ON r.cfn_person_id = s.cfn_person_id
+        AND r.date BETWEEN s.week_begin AND s.date_end;
 
     RETURN 'Swipes PTO load completed successfully';
 
