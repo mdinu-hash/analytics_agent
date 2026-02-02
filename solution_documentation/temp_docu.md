@@ -395,3 +395,94 @@ CALL sp_swipespto_insert();
 -- 3. Verify results
 SELECT * FROM swipespto ORDER BY swipe_date DESC, swipe_time DESC;
 ```
+
+---
+
+# Swipes PTO Weekly View
+
+## View Definition
+
+```sql
+-- =============================================================
+-- VIEW: swipes_pto_weekly
+-- Aggregates swipe data at week level, including employees
+-- who did not swipe (zero swipes counted)
+-- =============================================================
+CREATE OR REPLACE VIEW swipes_pto_weekly AS
+WITH date_range AS (
+    -- Get the date range from swipespto
+    SELECT
+        MIN(swipe_date) AS min_date,
+        MAX(swipe_date) AS max_date
+    FROM swipespto
+),
+
+-- Get all weekdays in the date range (exclude weekends)
+calendar_days AS (
+    SELECT
+        d.date,
+        d.week_start
+    FROM dim_date d
+    CROSS JOIN date_range dr
+    WHERE d.date BETWEEN dr.min_date AND dr.max_date
+      AND d.day_of_week NOT IN (5, 6)  -- Exclude weekends
+),
+
+-- Cross join calendar days with valid employees for each day
+-- An employee is valid if the date falls between their week_begin and date_end
+employee_day_base AS (
+    SELECT
+        cd.date,
+        cd.week_start,
+        s.employee_key
+    FROM calendar_days cd
+    INNER JOIN staffingdata s
+        ON cd.date BETWEEN s.week_begin AND s.date_end
+),
+
+-- Enhance with swipe counts per employee per day
+enhanced_data AS (
+    SELECT
+        edb.employee_key,
+        edb.date,
+        edb.week_start,
+        COUNT(sp.record_key) AS swipes,
+        CASE WHEN COUNT(sp.record_key) >= 1 THEN 1 ELSE 0 END AS day_in_office
+    FROM employee_day_base edb
+    LEFT JOIN swipespto sp
+        ON edb.employee_key = sp.employee_key
+        AND edb.date = sp.swipe_date
+    GROUP BY edb.employee_key, edb.date, edb.week_start
+)
+
+-- Final aggregation at week level
+SELECT
+    employee_key,
+    week_start,
+    SUM(swipes) AS swipes,
+    SUM(day_in_office) AS days_in_office
+FROM enhanced_data
+GROUP BY employee_key, week_start;
+```
+
+---
+
+## Usage
+
+```sql
+-- Query weekly swipe summary for all employees
+SELECT * FROM swipes_pto_weekly ORDER BY week_start DESC, employee_key;
+
+-- Join with staffingdata for employee details
+SELECT
+    v.week_start,
+    s.employee_name,
+    s.financial_department,
+    v.swipes,
+    v.days_in_office
+FROM swipes_pto_weekly v
+JOIN staffingdata s
+    ON v.employee_key = s.employee_key
+    AND v.week_start = s.week_begin
+ORDER BY v.week_start DESC, s.employee_name;
+```
