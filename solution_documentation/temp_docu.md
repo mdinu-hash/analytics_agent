@@ -53,11 +53,30 @@ RETURNS VARCHAR
 LANGUAGE SQL
 AS
 $$
+DECLARE
+    validation_result VARIANT;
 BEGIN
 
     -- =============================================================
-    -- MERGE: Upsert from raw into destination with employee_path
+    -- Step 0: Validate raw data before loading
+    -- =============================================================
+    CALL sp_validate_staffingdata_raw() INTO validation_result;
+
+    IF (validation_result:error_count > 0) THEN
+        RETURN OBJECT_CONSTRUCT(
+            'status', 'Load aborted',
+            'reason', 'Data quality issues found',
+            'error_count', validation_result:error_count,
+            'validation_details', validation_result
+        )::VARCHAR;
+    END IF;
+
+    BEGIN TRANSACTION;
+
+    -- =============================================================
+    -- Step 1: MERGE - Upsert from raw into destination
     -- Key: (week_begin, cfn_person_id)
+    -- Note: date_end set to placeholder, will be recalculated in Step 2
     -- =============================================================
 
     MERGE INTO staffingdata AS tgt
@@ -124,19 +143,11 @@ BEGIN
             ) = 1
         ),
 
-        -- Join raw data with computed paths and calculate date_end
+        -- Join raw data with computed paths
         source_data AS (
             SELECT
                 r.cfn_person_id,
                 r.week_begin,
-                -- date_end = next week_begin - 1 day, or 9999-12-31 if last record
-                COALESCE(
-                    DATEADD(DAY, -1, LEAD(r.week_begin) OVER (
-                        PARTITION BY r.cfn_person_id
-                        ORDER BY r.week_begin
-                    )),
-                    '9999-12-31'::DATE
-                ) AS date_end,
                 r.employee_name,
                 r.email,
                 r.direct_supervisor_name,
@@ -164,7 +175,6 @@ BEGIN
 
     -- UPDATE existing records (metadata may have changed)
     WHEN MATCHED THEN UPDATE SET
-        tgt.date_end = src.date_end,
         tgt.employee_name = src.employee_name,
         tgt.email = src.email,
         tgt.direct_supervisor_name = src.direct_supervisor_name,
@@ -178,7 +188,7 @@ BEGIN
         tgt.employee_path = src.employee_path,
         tgt.insert_date = src.insert_date
 
-    -- INSERT new records
+    -- INSERT new records (date_end placeholder, recalculated in Step 2)
     WHEN NOT MATCHED THEN INSERT (
         employee_key,
         cfn_person_id,
@@ -200,7 +210,7 @@ BEGIN
         seq_employee_key.NEXTVAL,
         src.cfn_person_id,
         src.week_begin,
-        src.date_end,
+        '9999-12-31'::DATE,  -- Placeholder, recalculated below
         src.employee_name,
         src.email,
         src.direct_supervisor_name,
@@ -215,7 +225,41 @@ BEGIN
         src.insert_date
     );
 
-    RETURN 'Load completed successfully';
+    -- =============================================================
+    -- Step 2: Recalculate date_end for all affected persons
+    -- This ensures previously loaded records get correct date_end
+    -- when new weeks are added for the same person
+    -- =============================================================
+
+    UPDATE staffingdata tgt
+    SET date_end = src.calculated_date_end
+    FROM (
+        SELECT
+            employee_key,
+            COALESCE(
+                DATEADD(DAY, -1, LEAD(week_begin) OVER (
+                    PARTITION BY cfn_person_id
+                    ORDER BY week_begin
+                )),
+                '9999-12-31'::DATE
+            ) AS calculated_date_end
+        FROM staffingdata
+        WHERE cfn_person_id IN (SELECT DISTINCT cfn_person_id FROM staffingdata_raw)
+    ) src
+    WHERE tgt.employee_key = src.employee_key
+      AND tgt.date_end != src.calculated_date_end;
+
+    COMMIT;
+
+    RETURN OBJECT_CONSTRUCT(
+        'status', 'Load completed successfully',
+        'validation_result', validation_result
+    )::VARCHAR;
+
+EXCEPTION
+    WHEN OTHER THEN
+        ROLLBACK;
+        RAISE;
 
 END;
 $$;
