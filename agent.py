@@ -10,10 +10,10 @@ import datetime
 from typing_extensions import TypedDict, Annotated, Literal, Union
 from langgraph.graph.message import add_messages
 from typing import Sequence
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, RemoveMessage
 from langchain_core.agents import AgentAction
 import operator
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from typing import Iterator
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_openai import OpenAIEmbeddings
@@ -24,20 +24,14 @@ from langgraph.checkpoint.memory import MemorySaver
 import queue
 
 # Import initialization components
-from src.init.initialization import (
-    llm, llm_fast, create_config, tracer,
-    objects_documentation, sql_dialect, connection_string
+from initialization import (
+    llm, llm_fast, create_config,
+    objects_documentation, sql_dialect, db_path, key_terms,
+    get_token_usage, calculate_chat_history_tokens
 )
-from src.init.llm_util import create_prompt_template, get_token_usage, calculate_chat_history_tokens, llm_provider
 
-# Import PostgreSQL database utility
-from src.init.init_demo_database.demo_database_util import execute_query, create_objects_documentation
-
-# Import business glossary
-from src.init.business_glossary import key_terms, synonyms, related_terms, search_terms
-
-# Import database schema
-from src.init.database_schema import database_schema, table_relationships
+# Import database utility
+from initialize_demo_database.demo_database_util import execute_query
 
 _progress_queue = queue.Queue()  # Global shared progress queue
 
@@ -68,7 +62,6 @@ class State(TypedDict):
  generate_answer_details: dict
  llm_answer: BaseMessage
  scenario: str
- search_terms_output: dict  
 
 def extract_msg_content_from_history(messages_log:list):
  ''' from a list of base messages, extract just the content '''
@@ -81,16 +74,9 @@ class ClearOrAmbiguous(TypedDict):
   ''' conclusion about the analytical intent extraction process '''
   analytical_intent_clearness: Annotated[Literal["CLEAR", "AMBIGUOUS"],"conclusion about the analytical intent extraction process"] 
 
-class TermSubstitution(TypedDict):
-  ''' term substitution made when creating analytical intent '''
-  relationship: Annotated[Literal["synonym", "related_term"], "type of relationship between terms"]
-  searched_for: Annotated[str, "term from user question"]
-  replacement_term: Annotated[str, "term used in analytical intent"]
-
 class AnalyticalIntents(TypedDict):
-  ''' list of analytical intents with term substitutions '''
+  ''' list of analytical intents '''
   analytical_intent: Annotated[Union[list[str], None] ,"natural language descriptions to capture the analytical intents"]
-  term_substitutions: Annotated[list[TermSubstitution], "list of term substitutions made (empty list if none)"]
 
 class AmbiguityAnalysis(TypedDict):
   ''' analysis of ambiguous question with explanation and alternatives '''
@@ -105,10 +91,10 @@ def extract_analytical_intent(state:State):
   {objects_documentation}.
 
   Conversation history:
-  "{messages_log}".
+  {messages_log}.
 
   Last user prompt:
-  "{question}".
+  {question}.
 
 Important considerations about creating analytical intents:
     - The analytical intent will be used to create a single sql query.
@@ -129,38 +115,17 @@ Important considerations about creating analytical intents:
   - An analytical query is multi-step if it requires sequential data gathering and statistical analysis,
     where each search builds upon previous results to examine relationships, correlations, or comparative patterns between variables.
   - Break it down into sequential steps where each represents a distinct analytical intent:
-    Template: "Step 1: <analytical intent 1>. Step 2: <analytical intent 2>. Step 3: <analytical intent 3>"
-
-  Important: Track term substitutions
-  - Available term mappings (synonyms and related terms):
-    {available_term_mappings}
-
-  - ONLY use the term mappings provided above when deciding on substitutions.
-  - If you used a synonym or related term from the available term mappings instead of the user's exact terminology, report it in term_substitutions.
-  - For each substitution, specify:
-    * relationship: "synonym" if the terms mean the same thing, "related_term" if they're similar but different concepts.
-    * searched_for: the exact term from the user's question.
-    * replacement_term: the term from the database schema you used in the analytical intent.
-  - If no substitutions were made, return an empty list for term_substitutions.
+    Template: Step 1: <analytical intent 1>. Step 2: <analytical intent 2>. Step 3: <analytical intent 3>
     """
 
-  # Prepare input data
-  search_terms_output = state['search_terms_output']
-
-  input_data = {
+  # Create analytical intent (question is already determined to be clear by clarification_check) 
+  prompt_clear = ChatPromptTemplate.from_messages([('user',sys_prompt_clear)])
+  chain = prompt_clear | llm.with_structured_output(AnalyticalIntents)
+  result = chain.invoke({
         'objects_documentation': state['objects_documentation'],
         'question': state['current_question'],
-        'messages_log': extract_msg_content_from_history(state['messages_log']),
-        'available_term_mappings': search_terms_output.get('documentation', 'None')
-   }
-
-  # Create analytical intent (question is already determined to be clear by clarification_check)
-  prompt_clear = create_prompt_template('system', sys_prompt_clear)
-  chain = prompt_clear | llm.with_structured_output(AnalyticalIntents)
-  result = chain.invoke(input_data)
-
-  # Store term_substitutions in search_terms_output
-  state['search_terms_output']['term_substitutions'] = result.get('term_substitutions', [])
+        'messages_log': extract_msg_content_from_history(state['messages_log'])
+   })
 
   # Update the state (scenario A already set by clarification_check)
   state['analytical_intent'] = result['analytical_intent']
@@ -239,11 +204,14 @@ def create_sql_query_or_queries(state:State):
     ]  
   """
 
-  prompt = create_prompt_template('system', system_prompt)
+  prompt = ChatPromptTemplate.from_messages([('user',system_prompt)])
 
   chain = prompt | llm.with_structured_output(OutputAsAQuery)
 
-  result = chain.invoke({'objects_documentation':state['objects_documentation'], 'analytical_intent': state['analytical_intent'],'sql_dialect':state['sql_dialect']})
+  result = chain.invoke({'objects_documentation':state['objects_documentation'], 
+                         'analytical_intent': state['analytical_intent'],
+                         'sql_dialect':state['sql_dialect']})
+  
   show_progress(f"✅ SQL queries created:{len(result['query'])}")
   for q in result['query']:
    state['current_sql_queries'].append( {'query': q,
@@ -305,7 +273,7 @@ def create_query_insight(sql_query:str, sql_query_result:str):
        - Avoid technical terms like "data","dataset","table","list","provided information","query" etc.
    """
 
-   prompt = create_prompt_template('system', system_prompt)
+   prompt = ChatPromptTemplate.from_messages([('user',system_prompt)])
    chain = prompt | llm_fast.with_structured_output(QueryInsight)
    return chain.invoke({'sql_query':sql_query,
                         'sql_query_result':sql_query_result})
@@ -337,7 +305,7 @@ List of highlight types:
     Ex: "Results limited to top 10 affiliates by assets”  
     """
 
-    prompt = create_prompt_template('system', system_prompt)
+    prompt = ChatPromptTemplate.from_messages([('user',system_prompt)])
     chain = prompt | llm_fast.with_structured_output(QueryExplanation)
 
     llm_explanation = chain.invoke({
@@ -373,83 +341,11 @@ def correct_syntax_sql_query(sql_query: str, error:str, objects_documentation: s
   Output the corrected version of the query.
   """
 
- prompt = create_prompt_template('system', system_prompt)
+ prompt = ChatPromptTemplate.from_messages([('user',system_prompt)])
  chain = prompt | llm.with_structured_output(OutputAsASingleQuery)
  result = chain.invoke({'sql_query':sql_query,'error':error,'objects_documentation':objects_documentation, 'sql_dialect':sql_dialect})
  sql_query = result['query']
  return sql_query
-
-def add_key_assumptions_from_term_substitutions(search_terms_output: dict) -> dict:
-    """
-    Creates Key Assumptions based on term substitutions reported by LLM.
-
-    Args:
-        search_terms_output: Output from search_terms function (contains term_substitutions)
-
-    Returns:
-        dict with 'key_assumptions': list of assumption strings
-    """
-    key_assumptions = []
-    term_substitutions = search_terms_output.get('term_substitutions', [])
-
-    for substitution in term_substitutions:
-        relationship = substitution.get('relationship')
-        searched_for = substitution.get('searched_for', '')
-        replacement_term = substitution.get('replacement_term', '')
-
-        # Look up definitions for the replacement term from search_terms_output
-        replacement_def = ''
-        for term in search_terms_output.get('key_terms', []):
-            if term.get('name', '').lower() == replacement_term.lower():
-                replacement_def = term.get('definition', '')
-                break
-
-        if relationship == 'synonym':
-            # Get searched_for definition from synonym data (handle both single and multiple synonyms)
-            searched_for_def = ''
-            synonym_data = search_terms_output.get('synonym')
-            if synonym_data:
-                # Check if single synonym or multiple synonyms
-                if 'matches' in synonym_data:
-                    # Multiple synonyms - search in matches list
-                    for syn_match in synonym_data['matches']:
-                        if syn_match.get('searched_for', '').lower() == searched_for.lower():
-                            searched_for_def = syn_match.get('definition', '')
-                            break
-                else:
-                    # Single synonym
-                    if synonym_data.get('searched_for', '').lower() == searched_for.lower():
-                        searched_for_def = synonym_data.get('definition', '')
-
-            # "{replacement_term} is {replacement_def}"
-            if replacement_def:
-                key_assumptions.append(f"{replacement_term} is {replacement_def}")
-
-        elif relationship == 'related_term':
-            # Get searched_for definition from related_terms
-            searched_for_def = ''
-            related_terms_data = search_terms_output.get('related_terms')
-            if related_terms_data and related_terms_data.get('searched_for', '').lower() == searched_for.lower():
-                searched_for_def = related_terms_data.get('definition', '')
-
-            if searched_for_def:
-                # "{searched_for} ({searched_for_def}) does not exist in the tables I have access to. I returned the data for {replacement_term} ({replacement_def})"
-                if replacement_def:
-                    key_assumptions.append(
-                        f"{searched_for} ({searched_for_def}) does not exist in the tables I have access to. I returned the data for {replacement_term} ({replacement_def})"
-                    )
-                else:
-                    key_assumptions.append(
-                        f"{searched_for} ({searched_for_def}) does not exist in the tables I have access to. I returned the data for {replacement_term}"
-                    )
-            else:
-                # "I returned the data for {replacement_term} ({replacement_def})"
-                if replacement_def:
-                    key_assumptions.append(f"I returned the data for {replacement_term} ({replacement_def})")
-                else:
-                    key_assumptions.append(f"I returned the data for {replacement_term}")
-
-    return {'key_assumptions': key_assumptions}
 
 @tool
 def execute_sql_query(state:State):
@@ -468,7 +364,7 @@ def execute_sql_query(state:State):
 
        # executes the query and if it throws an error, correct it (max 3x times) then execute it again.
        try:
-           results = execute_query(sql_query, connection_string)
+           results = execute_query(sql_query, db_path)
            if results is None or len(results) == 0:
                sql_query_result = "No results found."
            else:
@@ -486,7 +382,7 @@ def execute_sql_query(state:State):
             state['current_sql_queries'][query_index]['query'] = sql_query
 
             try:
-                results = execute_query(sql_query, connection_string)
+                results = execute_query(sql_query, db_path)
                 if results is None or len(results) == 0:
                     sql_query_result = "No results found."
                 else:
@@ -592,8 +488,8 @@ def refine_sql_query(analytical_intent: str, sql_query: str, objects_documentati
          For example, if the user asks for time based analysis per customer, do not drop time or customer attributes. 
          Instead, you can use optimization example D (filter date range) or example B (aggregate time at higher level).                   
   """
- 
- prompt = create_prompt_template('system', system_prompt)
+
+ prompt = ChatPromptTemplate.from_messages([('user',system_prompt)])
  chain = prompt | llm.with_structured_output(OutputAsASingleQuery)
 
  result = chain.invoke({'analytical_intent': analytical_intent,
@@ -607,17 +503,16 @@ def refine_sql_query(analytical_intent: str, sql_query: str, objects_documentati
 
 scenario_A = {
     'Type': 'A',
-    'Prompt': """You are a decision support consultant helping users become more data-driven.
+    'Prompt': f"""You are a decision support consultant helping users become more data-driven.
 Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
 
 Here is the conversation history with the user:
-{messages_log}.
-Latest user message:
-{question}.
-- Use both the raw SQL results and the extracted insights below to form your answer: {insights}.
+{{messages_log}}.
+
+- Use both the raw SQL results and the extracted insights below to form your answer: {{insights}}.
 - Don't assume facts that are not backed up by the data in the insights.
 - Include all details from these insights.
-- Suggest these next steps for the user: {agent_questions}.
+- Suggest these next steps for the user: {{agent_questions}}.
 
 Response guidelines:
   - Respond in clear, non-technical language.
@@ -630,8 +525,7 @@ Response guidelines:
     Example: "Keep up the great work!", "Have a great day ahead!"
 """,
     'Invoke_Params': lambda state: {
-        'messages_log': state['messages_log'],
-        'question': state['current_question'],
+        'messages_log': state['messages_log'],        
         'objects_documentation': state['objects_documentation'],
         'insights': format_sql_query_results_for_prompt(state['current_sql_queries']),
         'agent_questions': state['generate_answer_details'].get('agent_questions', [])
@@ -640,16 +534,13 @@ Response guidelines:
 
 scenario_B = {
     'Type': 'B',
-    'Prompt': """You are a decision support consultant helping users become more data-driven.
+    'Prompt': f"""You are a decision support consultant helping users become more data-driven.
 Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
 
 Here is the conversation history with the user:
-{messages_log}.
+{{messages_log}}.
 
-Latest user message:
-{question}.
-
-- Suggest these next steps for the user: {agent_questions}
+- Suggest these next steps for the user: {{agent_questions}}
 
 Response guidelines:
   - Respond in clear, non-technical language.
@@ -658,7 +549,6 @@ Response guidelines:
   - Ask the user which option they prefer from your suggested next steps.""",
     'Invoke_Params': lambda state: {
         'messages_log': state['messages_log'],
-        'question': state['current_question'],
         'objects_documentation': state['objects_documentation'],
         'agent_questions': state['generate_answer_details'].get('agent_questions', [])
     }
@@ -666,18 +556,15 @@ Response guidelines:
 
 scenario_C = {
     'Type': 'C',
-    'Prompt': """You are a decision support consultant helping users become more data-driven.
+    'Prompt': f"""You are a decision support consultant helping users become more data-driven.
 Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
 
 Here is the conversation history with the user:
-{messages_log}.
-
-Latest user message:
-{question}.
+{{messages_log}}.
 
 Unfortunately, the requested information from last prompt is not available in our database.
 
-- Suggest these next steps for the user: {agent_questions}.
+- Suggest these next steps for the user: {{agent_questions}}.
 
 Response guidelines:
   - Respond in clear, non-technical language.
@@ -686,7 +573,6 @@ Response guidelines:
   - Ask the user which option they prefer from your suggested next steps.""",
     'Invoke_Params': lambda state: {
         'messages_log': state['messages_log'],
-        'question': state['current_question'],
         'objects_documentation': state['objects_documentation'],
         'agent_questions': state['generate_answer_details'].get('agent_questions', [])
     }
@@ -694,24 +580,20 @@ Response guidelines:
 
 scenario_D = {
     'Type': 'D',
-    'Prompt': """You are a decision support consultant helping users become more data-driven.
+    'Prompt': f"""You are a decision support consultant helping users become more data-driven.
 Your task is to continue the conversation from the last user message by guiding the users to answer their analytical goal.
 
 Here is the conversation history with the user:
-{messages_log}.
-
-Latest user message:
-{question}.
+{{messages_log}}.
 
 The last user prompt could be interpreted in multiple ways.
-Explain the user this ambiguity reason: {ambiguity_explanation}.
-And ask user to specify which of these analysis it wants: {agent_questions}.
+Explain the user this ambiguity reason: {{ambiguity_explanation}}.
+And ask user to specify which of these analysis it wants: {{agent_questions}}.
 Respond in clear, non-technical language.
 Be concise.
 Keep it simple and conversational.""",
     'Invoke_Params': lambda state: {
         'messages_log': state['messages_log'],
-        'question': state['current_question'],
         'objects_documentation': state['objects_documentation'],
         'ambiguity_explanation': state['generate_answer_details'].get('ambiguity_explanation', ''),
         'agent_questions': state['generate_answer_details'].get('agent_questions', [])
@@ -748,9 +630,6 @@ def generate_agent_questions(state: State) -> list[str]:
 Here is the conversation history with the user:
 {messages_log}.
 
-Latest user message:
-{question}.
-
 Your task is to guide the users to answer their analytical goal that you derive from the conversation history and from the last user message.
 
 Suggest max 2 smart next steps for the user to explore further, chosen from the examples below and tailored to what's available in the database schema:
@@ -780,11 +659,10 @@ Suggest max 2 smart next steps for the user to explore further, chosen from the 
     Example: Instead of analyzing for all companies, suggest filtering for a single company and give a few suggestions.
     """
 
-    prompt = create_prompt_template('system', sys_prompt)
+    prompt = ChatPromptTemplate.from_messages([('system',sys_prompt), ('user',state['current_question'])])
     chain = prompt | llm.with_structured_output(AgentQuestions)
     result = chain.invoke({
         'messages_log': extract_msg_content_from_history(state['messages_log']),
-        'question': state['current_question'],
         'objects_documentation': state['objects_documentation']
     })
     return result['agent_questions']
@@ -804,7 +682,8 @@ def generate_answer(state:State):
 
   # create prompt template based on scenario
   sys_prompt = next(s['Prompt'] for s in scenario_prompts if s['Type'] == scenario)
-  prompt = create_prompt_template('system', sys_prompt, messages_log=True)
+
+  prompt = ChatPromptTemplate.from_messages([('system',sys_prompt), ('user',state['current_question'])])
   llm_answer_chain = prompt | llm
 
   # invoke parameters based on scenario
@@ -846,7 +725,8 @@ def manage_memory_chat_history(state:State):
 
     # Summarize older messages and keep last 4
     message_history_to_summarize = [msg.content for msg in state['messages_log'][:-4]]
-    prompt = create_prompt_template('user', 'Distill the below chat messages into a single summary paragraph.The summary paragraph should have maximum 400 tokens.Include as many specific details as you can.Chat messages:{message_history_to_summarize}')
+    sys_prompt = """Distill the below chat messages into a single summary paragraph.The summary paragraph should have maximum 400 tokens.Include as many specific details as you can.Chat messages:{message_history_to_summarize}"""
+    prompt = ChatPromptTemplate.from_messages([('user',sys_prompt)])
     runnable = prompt | llm_fast # use the cheap model
     chat_history_summary = runnable.invoke({'message_history_to_summarize':message_history_to_summarize})
     last_4_messages = state['messages_log'][-4:]
@@ -870,10 +750,7 @@ def clarification_check(state:State):
   {objects_documentation}.
 
   Conversation history:
-  "{messages_log}".
-
-  User question:
-  "{question}".
+  {messages_log}.
 
   *** The question is CLEAR if ***
   - It has a single, obvious analytical approach in terms of underlying source columns, relationships or past conversations.
@@ -888,8 +765,7 @@ def clarification_check(state:State):
 
   - You can deduct the analytical intent from the conversation history.
 
-  - User questions with terms referring to a single related term are CLEAR. See here: {available_term_mappings}.
-    Example: "A is related (similar but different) with: B".
+  - User questions with terms referring to a related concept covered in the schema are CLEAR.
 
   *** The question is AMBIGUOUS if ***
   - Different source columns would give different insights.
@@ -900,76 +776,15 @@ def clarification_check(state:State):
   Response format:
   If CLEAR -> "CLEAR".
   If AMBIGUOUS -> "AMBIGUOUS".
-  """
+  """  
 
-  # Prepare common input data
-  search_terms_output = state['search_terms_output']
-
-  input_data = {
-        'objects_documentation': state['objects_documentation'],
-        'question': state['current_question'],
-        'messages_log': extract_msg_content_from_history(state['messages_log']),
-        'available_term_mappings': search_terms_output.get('documentation', 'None')
-   }
-
-  # Check for scenario D: multiple related terms exist and related_term_searched_for does not exist in DB
-  related_terms_data = search_terms_output.get('related_terms')
-
-
-  # Check if: related_terms exists, has multiple matches, and the searched_for term doesn't exist in DB
-  if related_terms_data and len(related_terms_data.get('matches', [])) > 1:
-      searched_for_exists_in_db = False
-      # Check if searched_for term exists in key_terms
-      searched_for_lower = related_terms_data.get('searched_for', '').lower()
-      for term in search_terms_output.get('key_terms', []):
-          if term.get('name', '').lower() == searched_for_lower:
-              searched_for_exists_in_db = True
-              break
-
-
-      if not searched_for_exists_in_db:
-          # Scenario D triggered
-          related_term_name = related_terms_data.get('searched_for', '')
-          related_term_definition = related_terms_data.get('definition', '')
-          related_terms_list = related_terms_data.get('matches', [])
-
-          # Create ambiguity_explanation based on whether the searched term has a definition
-          if related_term_definition != '':
-              ambiguity_explanation = f"The term {related_term_name} is not available in the tables I have access to, but related terms are available."
-          else:
-              ambiguity_explanation = f"The term {related_term_name} can mean multiple things."
-
-          # Create agent_questions from related_terms
-          agent_questions_list = []
-          for rel_term in related_terms_list:
-              rel_name = rel_term.get('name', '')
-              rel_def = rel_term.get('definition', '')
-              if rel_def:
-                  agent_questions_list.append(f"{rel_name}: {rel_def}")
-              else:
-                  agent_questions_list.append(f"{rel_name}")
-
-          # Format as "Which option are you interested in? - option1. - option2..."
-          agent_questions_formatted = "Which option are you interested in? " + " ".join([f"- {q}." for q in agent_questions_list])
-
-          # Update state
-          tool_name = 'clarification'
-          state['scenario'] = 'D'
-          state['analytical_intent'] = []
-          state['generate_answer_details']['ambiguity_explanation'] = ambiguity_explanation
-          state['generate_answer_details']['agent_questions'] = [agent_questions_formatted]
-
-          # control flow
-          action = AgentAction(tool='clarification_check', tool_input='', log='tool ran successfully')
-          state['intermediate_steps'].append(action)
-          state['intermediate_steps'].append(AgentAction(tool=tool_name, tool_input='', log=''))
-
-          return state
-
-  # No scenario D trigger - use LLM to determine if clear or ambiguous
-  prompt_clear_or_ambiguous = create_prompt_template('system', sys_prompt_clear_or_ambiguous)
+  # Use LLM to determine if clear or ambiguous
+  prompt_clear_or_ambiguous = ChatPromptTemplate.from_messages([('system',sys_prompt_clear_or_ambiguous), ('user',state['current_question'])])
   chain = prompt_clear_or_ambiguous | llm.with_structured_output(ClearOrAmbiguous)
-  result = chain.invoke(input_data)
+  result = chain.invoke({
+        'objects_documentation': state['objects_documentation'],
+        'messages_log': extract_msg_content_from_history(state['messages_log'])
+   })
 
   # Based on result, route appropriately
   if result['analytical_intent_clearness'] == "CLEAR":
@@ -996,10 +811,10 @@ def clarification(state:State):
   {objects_documentation}.
 
   Here is the conversation history with the user:
-  "{messages_log}".
+  {messages_log}.
 
   Latest user message:
-  "{question}".
+  {question}.
 
   Step 1: Identify what makes the question ambiguous. The question is ambiguous if:
 
@@ -1024,20 +839,14 @@ def clarification(state:State):
 
   Use simple, non-technical language. Be concise.
   """
-
-  # Prepare input data
-  search_terms_output = state['search_terms_output']
-
-  input_data = {
+  # Generate ambiguity analysis
+  prompt_ambiguous = ChatPromptTemplate.from_messages([('user',sys_prompt_ambiguous)])
+  chain = prompt_ambiguous | llm.with_structured_output(AmbiguityAnalysis)
+  result = chain.invoke({
         'objects_documentation': state['objects_documentation'],
         'question': state['current_question'],
         'messages_log': extract_msg_content_from_history(state['messages_log'])
-   }
-
-  # Generate ambiguity analysis
-  prompt_ambiguous = create_prompt_template('system', sys_prompt_ambiguous)
-  chain = prompt_ambiguous | llm.with_structured_output(AmbiguityAnalysis)
-  result = chain.invoke(input_data)
+   })
 
   # Update state
   state['scenario'] = 'D'
@@ -1064,11 +873,6 @@ def add_assumptions(state:State):
           explanation = create_query_explanation(query_data['query'])
           if explanation.get('explanation') and isinstance(explanation['explanation'], list):
               key_assumptions.extend(explanation['explanation'])
-
-  # Add key assumptions from term substitutions
-  assumptions_output = add_key_assumptions_from_term_substitutions(state['search_terms_output'])
-  if assumptions_output.get('key_assumptions'):
-      key_assumptions.extend(assumptions_output['key_assumptions'])
 
   # Store in state
   state['generate_answer_details']['key_assumptions'] = key_assumptions
@@ -1104,13 +908,13 @@ def add_assumptions(state:State):
 def orchestrator(state:State):
   ''' Orchestrator deciding if the user question requires querying the database or is asking for info not available '''
 
-  system_prompt = f"""You are a decision support consultant helping users make data-driven decisions.
+  sys_prompt = """You are a decision support consultant helping users make data-driven decisions.
 
-    Your task is to decide the next action for this question: {{question}}.
+    Your task is to decide the next action for the user question.
 
-    Conversation history: {{messages_log}}. 
-    Current insights: "{{insights}}".
-    Database schema: {{objects_documentation}}
+    Conversation history: {messages_log}. 
+    Current insights: {insights}.
+    Database schema: {objects_documentation}.
 
     Decision process:  
 
@@ -1123,10 +927,10 @@ def orchestrator(state:State):
     
     Step 3. Otherwise → "Continue".
     """
-  prompt = create_prompt_template('system', system_prompt)
+  
+  prompt = ChatPromptTemplate.from_messages([('system',sys_prompt), ('user',state['current_question'])])
   chain = prompt | llm_fast.with_structured_output(ScenarioBC)
   result = chain.invoke({'messages_log':extract_msg_content_from_history(state['messages_log']),
-                         'question': state['current_question'], 
                          'insights': format_sql_query_results_for_prompt(state['current_sql_queries']),
                          'objects_documentation':state['objects_documentation']
                          })   
@@ -1205,20 +1009,10 @@ def run_control_flow(state:State):
   
 # assemble graph
 
-def add_key_terms_to_objects_documentation(base_documentation: str, search_terms_output: dict) -> str:
-    """
-    Adds relevant key terms section to the base objects documentation.
-
-    Args:
-        base_documentation: Base documentation string (tables, relationships, date ranges)
-        search_terms_output: Output from search_terms() function containing relevant terms
-
-    Returns:
-        Complete documentation string with key terms section added
-    """
-    # Build custom Key Terms section with only relevant terms
+def add_key_terms_to_objects_documentation(base_documentation: str, key_terms: list) -> str:
+    """Appends a Key Terms section to the base objects documentation."""
     key_terms_text = "\nKey Terms:\n"
-    for term in search_terms_output['key_terms']:
+    for term in key_terms:
         term_name = term.get('name', '')
         term_definition = term.get('definition', '')
         query_instructions = term.get('query_instructions', '')
@@ -1231,11 +1025,6 @@ def add_key_terms_to_objects_documentation(base_documentation: str, search_terms
         if query_instructions:
             key_terms_text += f"    {query_instructions}\n"
 
-    # Append documentation if exists
-    if search_terms_output.get('documentation'):
-        key_terms_text += f"\n{search_terms_output['documentation']}\n"
-
-    # Combine everything
     return base_documentation + key_terms_text
 
 # function to reset the state current queries (to add in the start of graph execution)
@@ -1251,13 +1040,7 @@ def reset_state(state:State):
     state['analytical_intent'] = []
     state['scenario'] = ''
 
-    # Call search_terms to get relevant terms for this question
-    search_terms_output = search_terms(state['current_question'], key_terms, synonyms, related_terms)
-    search_terms_output['term_substitutions'] = []  # Will be populated in extract_analytical_intent
-    state['search_terms_output'] = search_terms_output
-
-    # Add relevant key terms to the base objects_documentation
-    state['objects_documentation'] = add_key_terms_to_objects_documentation(objects_documentation, search_terms_output)
+    state['objects_documentation'] = add_key_terms_to_objects_documentation(objects_documentation, key_terms)
 
     state['sql_dialect'] = sql_dialect
     return state
@@ -1276,7 +1059,7 @@ graph.add_node("create_sql_query_or_queries",run_control_flow)
 graph.add_node("execute_sql_query",run_control_flow)
 graph.add_node("generate_answer",run_control_flow)
 graph.add_node("add_assumptions",run_control_flow)
-graph.add_node("manage_memory_chat_history",run_control_flow)  # NEW
+graph.add_node("manage_memory_chat_history",run_control_flow) 
 
 # Starting the agent
 graph.add_edge(START,"reset_state")

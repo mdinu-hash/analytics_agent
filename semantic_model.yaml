@@ -1,0 +1,357 @@
+# Semantic Model – Analytics Agent
+# Edit this file to update the agent's understanding of the database.
+# Changes take effect on the next agent startup.
+#
+# To enable a commented-out table or relationship, uncomment its block.
+
+
+# ── TABLES ───────────────────────────────────────────────────────────────────
+
+tables:
+
+  - table_name: date
+    table_description: Calendar dimension table for time-based analysis
+    columns:
+      calendar_day:
+        description: Specific calendar date (PRIMARY KEY)
+      month_name:
+        description: Full month name (January, February, etc.)
+      month:
+        description: Month number (1-12)
+      day_of_month:
+        description: Day within the month (1-31)
+      month_start_date:
+        description: First day of the month
+      month_end_date:
+        description: Last day of the month
+      quarter:
+        description: Quarter number (1-4)
+      quarter_name:
+        description: Quarter label (Q1, Q2, Q3, Q4)
+      quarter_start_date:
+        description: First day of the quarter
+      quarter_end_date:
+        description: Last day of the quarter
+      year:
+        description: Four-digit year
+      is_weekend:
+        description: Boolean flag indicating weekend days
+
+  - table_name: business_line
+    table_description: Investment product service lines offered by Capital Partners to advisors
+    columns:
+      business_line_key:
+        description: Unique identifier for Capital Partners business line (PRIMARY KEY)
+      business_line_name:
+        description: Capital Partners product service category (Managed Portfolio, SMA, Mutual Fund Wrap, Annuity, Cash)
+        sample_values: "Annuity | Cash | Managed Portfolio | Mutual Fund Wrap | Separately Managed Account"
+
+  - table_name: advisors
+    table_description: Financial advisors with historical tracking (SCD Type 2)
+    columns:
+      advisor_key:
+        description: Unique surrogate key (PRIMARY KEY)
+      advisor_id:
+        description: Natural business identifier for the advisor
+      advisor_tenure:
+        description: Years of experience as an advisor (1-40 years)
+      firm_name:
+        description: Name of the firm the advisor is part of (NOT Capital Partners)
+      firm_affiliation_model:
+        description: Business model of the advisor firm (RIA, Hybrid RIA, Broker-Dealer, etc.)
+        sample_values: "Bank/Trust | Broker-Dealer W-2 | Hybrid RIA | Independent BD | Insurance BD | RIA | Wirehouse"
+      advisor_role:
+        description: Position within the firm (Lead Advisor, Associate, etc.)
+        sample_values: "Associate Advisor | Client Service Associate | Lead Advisor | Portfolio Manager | Relationship Manager"
+      advisor_status:
+        description: Current employment status (Active/Terminated)
+        sample_values: "Active | Terminated"
+      practice_segment:
+        description: Size classification of advisory practice
+        sample_values: "Ensemble | Enterprise | Small Team | Solo Practice"
+      from_date:
+        description: Effective start date for this record version
+      to_date:
+        description: Effective end date for this record version
+
+  - table_name: household
+    table_description: Client households with historical tracking (SCD Type 2)
+    columns:
+      household_key:
+        description: Unique surrogate key (PRIMARY KEY)
+      household_id:
+        description: Natural business identifier for the household
+      household_tenure:
+        description: Years as a client (1-40 years)
+      household_registration_type:
+        description: Legal registration structure (Individual, Joint, Trust, Institutional)
+        sample_values: "Individual | Institutional | Joint | Trust"
+      household_registration_date:
+        description: Date when household became a client
+      household_segment:
+        description: Client service model classification
+        sample_values: "Active Trader | Advice-Seeking | Business/Institutional | Discretionary Managed | Retirement Income"
+      household_status:
+        description: Current relationship status (Active/Terminated)
+        sample_values: "Active | Terminated"
+      household_advisor_id:
+        description: ID of the primary advisor serving this household
+      from_date:
+        description: Effective start date for this record version
+      to_date:
+        description: Effective end date for this record version
+
+  - table_name: account
+    table_description: Individual investment accounts with historical tracking (SCD Type 2)
+    columns:
+      account_key:
+        description: Unique surrogate key (PRIMARY KEY)
+      account_id:
+        description: Natural business identifier for the account
+      advisor_key:
+        description: Foreign key to advisors table
+      household_key:
+        description: Foreign key to household table
+      business_line_key:
+        description: Foreign key to business_line table
+      account_type:
+        description: Tax classification (Taxable, IRA, 401k, Trust, Custody)
+        sample_values: "401k | Custody | IRA | Taxable | Trust"
+      account_custodian:
+        description: Firm holding the assets (Schwab, Fidelity, Pershing, etc.)
+        sample_values: "BankTrust | Fidelity | In-House | Pershing | Schwab"
+      opened_date:
+        description: Date the account was opened
+      account_status:
+        description: Current status (Open/Closed)
+        sample_values: "Closed | Open"
+      closed_date:
+        description: Date account was closed (if applicable)
+      account_risk_profile:
+        description: Investment risk tolerance (Conservative, Moderate, Aggressive)
+        sample_values: "Aggressive | Conservative | Moderate"
+      from_date:
+        description: Effective start date for this record version
+      to_date:
+        description: Effective end date for this record version
+
+  - table_name: product
+    table_description: Investment products and securities
+    columns:
+      product_id:
+        description: Unique identifier for investment product (PRIMARY KEY)
+      asset_category:
+        description: High-level asset classification (Equity, Fixed Income, Multi-Asset, Cash)
+        sample_values: "Cash | Equity | Fixed Income | Multi-Asset"
+      asset_subcategory:
+        description: Detailed product classification within asset category
+        sample_values: "Balanced Fund (60/40) | Common Stock | Equity Mutual Fund | Investment-Grade Corporate Bond | Money Market Fund | Municipal Bond | Preferred Stock | Target-Date Fund | U.S. Treasury Bill | U.S. Treasury Note"
+      product_line:
+        description: Distribution channel or wrapper type
+        sample_values: "Annuity Contract | ETF | Money Market | Mutual Fund | Separately Managed Account Strategy"
+      product_name:
+        description: Full name of the investment product
+
+  - table_name: tier_fee
+    table_description: Fee schedule based on asset levels by business line
+    columns:
+      tier_fee_id:
+        description: Unique identifier (PRIMARY KEY)
+      business_line_key:
+        description: Foreign key to business_line table
+      tier_min_aum:
+        description: Minimum assets under management for this fee tier
+      tier_max_aum:
+        description: Maximum assets under management for this fee tier
+      tier_fee_bps:
+        description: "Fee rate in basis points (e.g., 90 = 0.90%). Non-additive measure."
+
+  - table_name: advisor_payout_rate
+    table_description: Commission/payout rates by firm affiliation model
+    columns:
+      firm_affiliation_model:
+        description: "Type of firm affiliation (PRIMARY KEY). Source is table advisors, column firm_affiliation_model."
+        sample_values: "Bank/Trust | Broker-Dealer W-2 | Hybrid RIA | Independent BD | Insurance BD | RIA | Wirehouse"
+      advisor_payout_rate:
+        description: "Percentage of revenue paid to advisor (e.g., 0.7800 = 78%). Non-additive measure."
+
+  - table_name: fact_account_monthly
+    table_description: Monthly account performance and asset data
+    columns:
+      snapshot_date:
+        description: End-of-month date for the data snapshot
+        date_range: account dates between 2024-09-30 and 2025-09-30
+      account_key:
+        description: Foreign key to account table
+      account_monthly_return:
+        description: Monthly investment return percentage. Non-additive measure.
+      account_net_flow:
+        description: Net deposits/withdrawals during the month. Additive measure.
+      account_assets_previous_month:
+        description: Asset value at start of month. Semi-additive measure.
+      account_assets:
+        description: Asset value at end of month. Semi-additive measure.
+      advisor_key:
+        description: Foreign key to advisors table (current advisor)
+      household_key:
+        description: Foreign key to household table
+      business_line_key:
+        description: Foreign key to business_line table
+
+  # - table_name: fact_account_product_monthly
+  #   table_description: Monthly asset allocation by product for each account
+  #   columns:
+  #     snapshot_date:
+  #       description: End-of-month date for the allocation snapshot
+  #       date_range: product account dates between 2024-09-30 and 2025-09-30
+  #     account_key:
+  #       description: Foreign key to account table
+  #     product_id:
+  #       description: Foreign key to product table
+  #     product_allocation_pct:
+  #       description: Percentage of account allocated to this product. Non-additive measure.
+
+  # - table_name: fact_household_monthly
+  #   table_description: "Monthly aggregated household data. This table aggregates fact_account_monthly at household level."
+  #   columns:
+  #     snapshot_date:
+  #       description: End-of-month date for the data snapshot
+  #       date_range: household dates between 2024-09-30 and 2025-09-30
+  #     household_key:
+  #       description: Foreign key to household table
+  #     household_assets:
+  #       description: "Total assets across all household accounts. Aggregation over table fact_account_monthly -> column account_assets. Semi-additive measure."
+  #     asset_range_bucket:
+  #       description: Categorized asset range for segmentation
+  #       sample_values: "$0 – $100k | $100k – $250k | $1M – $5M | $250k – $500k | $500k – $1M"
+  #     high_net_worth_flag:
+  #       description: Boolean indicator for high-net-worth status
+  #     household_net_flow:
+  #       description: "Net deposits/withdrawals across all accounts. Aggregation of table fact_account_monthly -> column account_net_flow. Additive measure."
+
+  # - table_name: fact_revenue_monthly
+  #   table_description: Monthly fee and revenue calculations
+  #   columns:
+  #     snapshot_date:
+  #       description: End-of-month date for revenue calculation
+  #       date_range: revenue dates between 2024-09-30 and 2025-09-30
+  #     account_key:
+  #       description: Foreign key to account table
+  #     advisor_key:
+  #       description: Foreign key to advisors table
+  #     household_key:
+  #       description: Foreign key to household table
+  #     business_line_key:
+  #       description: Foreign key to business_line table
+  #     account_assets:
+  #       description: Asset value used for fee calculation. Semi-additive measure.
+  #     fee_percentage:
+  #       description: Annual fee rate applied to assets. Non-additive measure.
+  #     gross_fee_amount:
+  #       description: "Total fee charged before deductions. Equals to account_assets x fee_percentage. Additive measure."
+  #     third_party_fee:
+  #       description: Fees paid to external parties. Additive measure.
+  #     advisor_payout_rate:
+  #       description: "Percentage of net revenue paid to advisor. Source is table advisor_payout_rate -> column advisor_payout_rate. Non-additive measure."
+  #     advisor_payout_amount:
+  #       description: "Dollar amount paid to advisor. Equals to (gross_fee_amount - third_party_fee) x advisor_payout_rate. Additive measure."
+  #     net_revenue:
+  #       description: "Revenue retained by Capital Partners. Equals to gross_fee_amount - third_party_fee - advisor_payout_amount. Additive measure."
+
+  # - table_name: fact_customer_feedback
+  #   table_description: Client satisfaction and feedback data
+  #   columns:
+  #     feedback_id:
+  #       description: Unique feedback record identifier (PRIMARY KEY)
+  #     feedback_date:
+  #       description: Date feedback was collected
+  #       date_range: feedback dates between 2024-01-01 and 2025-09-30
+  #     household_key:
+  #       description: Foreign key to household table
+  #     advisor_key:
+  #       description: Foreign key to advisors table
+  #     feedback_text:
+  #       description: Customer comments (max 200 characters)
+  #     satisfaction_score:
+  #       description: "Numeric satisfaction rating (0-100). Non-additive measure."
+
+
+# ── BUSINESS GLOSSARY ─────────────────────────────────────────────────────────
+
+key_terms:
+
+  # Assets
+  - name: [Assets Under Management, aum, total assets]
+    definition: Total market value of all client investments
+    query_instructions: |
+      Use account_assets from fact_account_monthly table.
+      Don't aggregate over time as this measure is semi-additive.
+      You can aggregate this measure at advisor, household, or business line level.
+
+  - name: [advisory assets]
+    definition: Assets in Managed Portfolio and SMA business lines
+    query_instructions: |
+      Aggregate fact_account_monthly.account_assets filtered for business_line_name in ('Separately Managed Account','Managed Portfolio').
+      Don't aggregate over time as this measure is semi-additive.
+
+  - name: [liquid assets]
+    definition: assets easily converted to cash
+    query_instructions: ""
+
+  - name: [household, client]
+    definition: business or individual with a contractual agreement with advisors
+    query_instructions: "to get recent records, filter for household.household_status = 'Active' and household.to_date = '9999-12-31'"
+
+  - name: [advisor]
+    definition: ""
+    query_instructions: "to get recent records, filter for advisors.advisor_status = 'Active' and advisors.to_date = '9999-12-31'"
+
+  - name: [account]
+    definition: ""
+    query_instructions: "to get recent records, filter for account.account_status = 'Active' and account.to_date = '9999-12-31'"
+
+  - name: [high net worth, hnw]
+    definition: "If household_assets >= $1M."
+    query_instructions: query fact_household_monthly for high_net_worth_flag = True
+
+  # Revenue Statement
+  - name: [payout, production]
+    definition: Dollar amount paid to advisor
+    query_instructions: Sum of fact_revenue_monthly.advisor_payout_amount
+
+  - name: [net revenue]
+    definition: Revenue retained by Capital Partners
+    query_instructions: Sum of fact_revenue_monthly.net_revenue
+
+  - name: [distribution]
+    definition: advisor payout after tech fees are deducted
+    query_instructions: ""
+
+
+# ── TABLE RELATIONSHIPS ───────────────────────────────────────────────────────
+
+relationships:
+  - key1: account.advisor_key
+    key2: advisors.advisor_key
+  - key1: account.household_key
+    key2: household.household_key
+  - key1: account.business_line_key
+    key2: business_line.business_line_key
+  - key1: fact_account_monthly.account_key
+    key2: account.account_key
+  # - key1: fact_revenue_monthly.account_key
+  #   key2: account.account_key
+  - key1: transactions.product_id
+    key2: product.product_id
+  - key1: fact_account_monthly.snapshot_date
+    key2: date.calendar_day
+  # - key1: fact_account_product_monthly.snapshot_date
+  #   key2: date.calendar_day
+  # - key1: fact_household_monthly.snapshot_date
+  #   key2: date.calendar_day
+  # - key1: fact_revenue_monthly.snapshot_date
+  #   key2: date.calendar_day
+  - key1: transactions.transaction_date
+    key2: date.calendar_day
+  # - key1: fact_customer_feedback.feedback_date
+  #   key2: date.calendar_day
