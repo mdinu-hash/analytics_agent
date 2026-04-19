@@ -117,4 +117,4 @@ This solution works for native NL2SQL agents from Databricks (Genie), Snowflake 
 
 ## Let's connect
 
-If you're deploying agentic AI in regulated environments, I'd like to hear about it. Reach me on LinkedIn (link in my GitHub profile) or open an issue on this repo.
+If you're deploying agentic AI in regulated environments, I'd like to hear about it. Reach me on LinkedIn (link in my GitHub profile)
