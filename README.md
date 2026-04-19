@@ -1,204 +1,120 @@
-# AI Analytics Agent
+# Governed NL2SQL Agent: Decision-Safe Analytics for Enterprises
 
-Instant Insights Through Natural Language
-
-[Try The Live Demo: https://analytics-agent-7mzj7.ondigitalocean.app/]
-
-Tired of waiting weeks for data insights? This AI Analytics Agent turns natural language into powerful database queries — delivering business answers in seconds.
-
-## Why Use This Agent?
-
-Traditional BI tools and analyst ticket queues come with these problems:
-- Slow response times (days or weeks)
-- Poor UX: complex dashboards, overwhelming filters, pages that go unused
-
-This AI Analytics Agent changes that:
-- From delayed reports to instant insights and fast decisions
-- From SQL expertise required to natural conversation
-- (For data teams): From guessing what users want to a backlog driven by what users actually need 
-
-## What It Does
-
-Simply ask questions in plain English and get instant answers from your database — no SQL knowledge required, no dashboard navigation.
-
-Examples:
-- "Which practice segment has the highest amount of HNW clients?"
-- "List advisors under tenure 20 and their assets."
-- "For Oak Wealth firm, what was their EOM asset value and payout?"
-
-The agent handles:
-- Root Cause Analysis
-- Trend Monitoring
-- Comparative Analytics
-- Multi-step Reasoning
-- Conversational Follow-ups
----
-
-## Demo Dataset
-
-The demo runs on a **wealth management platform dataset** spanning September 2024 - September 2025, featuring a dimensional data model optimized for financial analytics.
-
-### Data Model Overview
-
-**Dimension Tables (with SCD Type 2 history tracking):**
-- **household** (45,000 records) - Client households with tenure, registration type, segment, advisor assignment
-- **advisors** (500 records) - Financial advisors with firm name, affiliation model, role, practice segment
-- **account** (72,000 records) - Investment accounts with type (Taxable, IRA, 401k, Trust), custodian, risk profile
-- **business_line** (5 records) - Product lines: Managed Portfolio, SMA, Mutual Fund Wrap, Annuity, Cash
-- **product** (350 records) - Investment products across equity, fixed income, multi-asset, and cash
-- **tier_fee** - Tiered fee structure by business line and AUM ranges
-- **advisor_payout_rate** - Payout rates by firm affiliation model
-- **date** - Calendar dimension table
-
-**Fact Tables (Monthly grain):**
-- **fact_account_monthly** - Monthly account metrics: returns, net flows, assets
-- **fact_revenue_monthly** - Revenue analytics: gross fees, third-party fees, advisor payouts, net revenue
-- **fact_household_monthly** - Household aggregations: total assets, HNW flags, asset range buckets
-- **fact_account_product_monthly** - Product allocation percentages per account
-- **fact_customer_feedback** - Customer satisfaction surveys with sentiment scores (0-100)
-- **transactions** - Detailed transaction history (deposits, withdrawals, fees)
-
-### Sample Analytical Questions
-
-**Revenue & Growth Analysis:**
-- "What was our net inflow of client assets this month compared to same month last year?"
-- "What's our YTD fee revenue by product line, and which products are growing fastest?"
-- "How much month-to-date fee revenue have we generated vs same period last month?"
-
-**Advisor Performance:**
-- "Which advisors brought in the most net new AUM in the past 30 days?"
-- "Which advisors show warning signals: <7 satisfaction scores in last 90 days AND net outflows?"
-- "What helps an advisor generate more revenue? Products, business lines, or account types?"
-
-**Client Segmentation:**
-- "How many high-net-worth clients do we have and what's their total AUM?"
-- "Which practice segment has the highest amount of HNW clients?"
-
-**Risk & Operations:**
-- "Which clients have >70% of AUM in a single product or in cash?"
-- "Which top 20 clients had the largest withdrawals in the past 7 days?"
+*Add AI on top of your data warehouse — without breaking user trust.*
 
 ---
 
-## How It Works
+*"Let's put AI on top of our data warehouse so users can query analytics just by asking questions."*
 
-Built on LangGraph, the agent executes a series of intelligent steps for every user prompt. Each step builds on the previous one to deliver accurate, data-driven answers.
+Most enterprises start here. Native AI services (Databricks Genie, Snowflake Cortex Analyst, Microsoft Data Fabric Agents) make it fast to spin up a PoC.
 
-### Architecture Diagram
+But in regulated environments where detail and words matter, these PoCs often break — and decision-makers lose trust.
+
+---
+
+## Common failures of analytics agents
+
+**Hidden assumptions.** User: *"What is the revenue?"* — Answer 1: *"$6M"* — Answer 2: *"$5M"*. Both technically correct — $5M is YTD, $6M is rolling 12 months. The agent did not disclose these assumptions.
+
+**Fabricated conclusions.** User asks: *"Which client segments have the most room to grow?"* Agent retrieves correct data, but concludes without justification that *"all segments have the most room to grow."* SQL was correct. Conclusion was not.
+
+**Lack of clarification.** Users often don't know what's analytically possible and ask vague questions like *"Who are the top clients?"* The agent shouldn't query anything. It should follow up: *"By top, do you mean by headcount or by revenue?"*
+
+**No data acknowledgment.** When users ask about data that isn't available, the agent should explicitly state so — not guess a near-match.
+
+**Undefined business terminology.** Terms like *"assets under management"* may have no official definition, refer to multiple asset types, or be interpreted differently by different teams. The agent should call out the ambiguity, not pick the most convenient interpretation.
+
+**Incorrect use of key terms.** User: *"What is the compensation for firm X?"* Agent: *"The compensation for firm X is $Y. This amount of revenue means..."* — using *"revenue"* loosely, not according to the internal revenue statement. The agent should enforce formal definitions.
+
+**Missing default filters.** User: *"How many accounts do we have?"* In natural language, this means only open accounts. The agent should apply business-default filters automatically.
+
+**Acknowledgment of time frame.** Date columns refresh frequently. If the agent is unaware of the data refresh state, *"EOM asset value"* becomes ambiguous — it doesn't know *"EOM"* means, for example, *December 2024*.
+
+**Incorrect metric aggregation.** Some metrics can't be aggregated across time but can be aggregated across other dimensions (e.g., assets). The agent should be prevented from aggregating assets over time.
+
+---
+
+## What makes analytics agents safe for decision-making
+
+This repo is a **decision-safety layer for NL2SQL agents**. It sits between the user and the NL2SQL engine (Databricks Genie, Snowflake Cortex Analyst, or custom NL2SQL agents) and enforces the policies that keep user trust intact:
+
+**Clarification before execution.** The agent must not execute queries unless there is a clear analytical intent. When a question is ambiguous, the agent blocks execution, explains why it can't be answered as stated, and proposes 2–3 alternative interpretations.
+
+**Explicit acknowledgment of missing data.** If the requested data is not available, the agent must explicitly state that it cannot answer and suggest viable alternatives.
+
+**Assumptions disclosure.** Every analytical answer must disclose its assumptions — timeframe, filters, definitions — in non-technical language. This ensures answers are understood by non-technical decision-makers.
+
+**Full observability.** Every user–agent interaction — question, answer, SQL, results, assumptions — is logged for governance review.
+
+### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                          Analytics Agent - LangGraph Architecture                                │
-└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-
-[START] ──► ┌─────────────┐ ──► ┌─────────────────────┐
-            │orchestrator │     │extract_analytical   │
-            │(Decision    │     │_intent              │
-            │ Logic)      │     │(Ambiguity Detection)│
-            └─────┬───────┘     └─────────┬───────────┘
-                  │                       │
-       ┌──────────┼──────────┐            │
-       │          │          │            │
-       ▼          ▼          ▼            ▼
-┌────────────┐ ┌────────────┐ ┌─────────────────────┐ ┌─────────────────────┐
-│Scenario B  │ │Scenario C  │ │Clear Intent         │ │Ambiguous Intent     │
-│Pleasantries│ │No Data     │ │        │            │ │                     │
-│     │      │ │     │      │ │        ▼            │ │            │        │
-│     ▼      │ │     ▼      │ │┌─────────────────────┐│ │          ▼        │
-│┌──────────┐│ │┌──────────┐│ ││create_sql_query_or  ││ │ ┌─────────────────┐│
-││generate  ││ ││generate  ││ ││_queries             ││ │ │generate_answer  ││
-││ answer   ││ ││ answer   ││ ││         │           ││ │ │(Clarification)  ││
-││          ││ ││          ││ ││         ▼           ││ │ │                 ││
-│└─────┬────┘│ │└─────┬────┘│ ││┌─────────────────────┐││ │ └────────┬──────┘│
-└──────┼─────┘ └──────┼─────┘ │││execute_sql_query    │││ └──────────┼────────┘
-       │              │       │││+ Error Handling     │││            │
-       │              │       │││+ Token Management   │││            │
-       │              │       ││└─────────┬───────────┘││            │
-       │              │       ││          │            ││            │
-       │              │       ││          ▼            ││            │
-       │              │       ││┌─────────────────────┐││            │
-       │              │       │││generate_answer      │││            │
-       │              │       │││(Data Insights)      │││            │
-       │              │       ││└─────────┬───────────┘││            │
-       │              │       │└──────────┼────────────┘│            │
-       │              │       └───────────┼─────────────┘            │
-       │              │                   │                          │
-       └──────────────┼───────────────────┼──────────────────────────┘
-                      │                   │
-                      ▼                   ▼
-               ┌─────────────────────┐ ┌─────────────────────┐
-               │manage_memory_chat   │ │manage_memory_chat   │
-               │_history             │ │_history             │
-               └─────────┬───────────┘ └─────────┬───────────┘
-                         │                       │
-                         ▼                       ▼
-               [END]
+[START] ──► ┌─────────────────┐
+            │ orchestrator    │
+            │ (Decision Logic)│
+            └────────┬────────┘
+                     │
+       ┌─────────────┼─────────────┐
+       │             │             │
+       ▼             ▼             ▼
+┌──────────────┐ ┌──────────────┐ ┌────────────────────┐
+│ Scenario B   │ │ Scenario C   │ │ clarification_check│
+│ Pleasantries │ │ No Data      │ │ (Intent Analysis)  │
+└──────┬───────┘ └──────┬───────┘ └─────────┬──────────┘
+       │                │                    │
+       │                │         ┌──────────┼──────────┐
+       │                │         │ CLEAR    │ AMBIGUOUS│
+       │                │         ▼          ▼
+       │                │   ┌─────────────┐ ┌──────────────┐
+       │                │   │ nl2sql_     │ │ clarification│
+       │                │   │ backend     │ │ (Scenario D) │
+       │                │   │ (Scenario A)│ │              │
+       │                │   │             │ │ - Generate   │
+       │                │   │ - Gen SQL   │ │   Altern.    │
+       │                │   │ - Execute   │ │              │
+       │                │   │ - Get Data  │ │              │
+       │                │   └──────┬──────┘ └──────┬───────┘
+       │                │          │                │
+       └────────────────┼──────────┘                │
+                        │                           │
+                        ▼                           ▼
+              ┌──────────────────────────────────────────┐
+              │ generate_answer                          │
+              │ (Create Conversational Response)         │
+              └─────────────┬────────────────────────────┘
+                            │
+                     ┌──────┴──────┐
+                     │ Scenario A? │
+                     └──────┬──────┘
+                            │
+                  ┌─────────┼─────────┐
+                  │ Yes              │ No
+                  ▼                  ▼
+          ┌────────────────┐      [END]
+          │ add_assumptions│
+          │ (Query         │
+          │  Explanations) │
+          └────────┬───────┘
+                   │
+                   ▼
+                [END]
 ```
 
-### 4-Step Process
+### Pluggable NL2SQL backends
 
-**Step 1: Orchestrator (Decision Logic)**
-- Analyzes the user question against conversation history and database schema
-- Routes to appropriate scenario:
-  - **Scenario B**: Pleasantries or questions already answered in chat history
-  - **Scenario C**: Requested data not available in database (suggests alternatives)
-  - **Continue**: Proceeds to analytical intent extraction
+This solution works for native NL2SQL agents from Databricks (Genie), Snowflake (Cortex Analyst), Microsoft (Data Fabric Agents), but also for custom NL2SQL agents.
 
-**Step 2: Extract Analytical Intent**
-- Translates natural language questions into technical analytical requirements
-- Detects ambiguity and asks for clarification when needed
-- Example: "Top client" could mean by revenue OR by tenure - which one?
-- Generates 1-5 analytical intents depending on question complexity
+---
 
-**Step 3: Create & Execute SQL Queries**
-- Converts analytical intents into clean, executable SQL queries
-- Automatic error correction (up to 3 attempts)
-- Query optimization if results exceed token limits
-- Executes queries and stores results with insights
+## Results
 
-**Step 4: Generate Answer & Manage Memory**
-- Provides user-friendly responses with positive, encouraging tone
-- Suggests relevant next steps for deeper analysis
-- Manages conversation history through intelligent summarization to maintain performance
+- Consistent answers decision-makers can rely on across contexts
+- Insights in minutes instead of days
+- Full audit trail for governance and compliance
+- Portable across Databricks, Snowflake, and Azure — no vendor lock-in on the decision layer
 
-## Advanced Capabilities
+---
 
-**Conversational Memory**
-- Maintains chat history for contextual follow-ups
-- Example: *"Which advisors brought in the most net new AUM?"* → *"What about their satisfaction scores?"* (remembers the advisor context)
+## Let's connect
 
-**Ambiguity Detection & Clarification**
-- Detects when questions have multiple valid interpretations
-- Example: *"Show me top advisors"* → *"Top advisors can mean by net new AUM, by total assets, or by client satisfaction scores - which would you like?"*
-
-**Missing Data Handling**
-- Detects when requested data isn't available in the database
-- Suggests alternative analyses with available data
-- Example: *"Unfortunately the database doesn't contain geographic region data. Would you like to explore by firm affiliation model or practice segment instead?"*
-
-**Multi-step Reasoning**
-- Handles complex analytical questions requiring multiple sequential steps
-- Uses CTEs (Common Table Expressions) to build sophisticated queries
-- Example: *"Which advisors show warning signals: ≥2 low satisfaction scores in last 90 days AND net outflows?"* (requires joining feedback data with account flow data)
-
-**Automatic Error Recovery**
-- Self-corrects SQL syntax errors (up to 3 attempts)
-- Optimizes queries that return too much data
-- Ensures reliable execution
-
-## Tech Stack
-
-**Framework**: LangGraph for agentic workflow orchestration
-**UI**: Streamlit with purple gradient interface
-**Database**: PostgreSQL.
-**LLM Providers**: OpenAI and Anthropic (via abstraction layer)
-**Deployment**: Docker container, deployed on Digital Ocean
-
-## Deployment
-
-This application is containerized with Docker and can be deployed anywhere:
-- **Current Demo**: Digital Ocean App Platform.
-- **Cloud Portable**: Azure, AWS, Snowflake, Databricks, GCP, or on-premise.
-
-[Try The Live Demo: https://analytics-agent-7mzj7.ondigitalocean.app/]
-
+If you're deploying agentic AI in regulated environments, I'd like to hear about it. Reach me on LinkedIn (link in my GitHub profile) or open an issue on this repo.
