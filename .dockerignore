@@ -63,7 +63,7 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
-*.db
+#*.db
 *.sqlite
 *.sqlite3
 notebooks/
