@@ -34,14 +34,16 @@ try:
     create_config = agent.create_config
     objects_documentation = agent.objects_documentation
     sql_dialect = agent.sql_dialect
+    make_progress_reporter = agent.make_progress_reporter
+    report_exec = agent.report_exec
     
 except Exception as e:
     st.error(f"❌ Failed to import agent: {e}")
     st.info("Make sure agent.py is in the same directory and the PostgreSQL connection is configured properly.")
     st.stop()
 
-progress_queue = queue.Queue()
-agent.set_progress_queue(progress_queue)
+report,drain = make_progress_reporter()
+report_exec.set(report)
 
 # Initialize session state
 if "messages" not in st.session_state:
@@ -683,15 +685,7 @@ with tab1:
             for step in graph.stream(state_dict, config=config, stream_mode="updates"):
                 step_name, output = list(step.items())[0]
                 final_state = output  # Keep most recent full state
-
-                # Check for progress message from agent.show_progress()
-                while not progress_queue.empty():
-                    try:
-                        msg = progress_queue.get_nowait()
-                        progress_log.append(msg)
-                        # Show progress in loading area
-                    except queue.Empty:
-                        pass
+                progress_log.extend(drain())
 
             # Display final response
             loading_placeholder.empty()

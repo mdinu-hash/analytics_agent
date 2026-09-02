@@ -3,6 +3,7 @@
 import pandas as pd
 import langchain, langgraph, langchain_openai, langsmith
 import os
+import contextvars
 from pathlib import Path
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
@@ -33,19 +34,24 @@ from initialization import (
 # Import database utility
 from initialize_demo_database.demo_database_util import execute_query
 
-_progress_queue = queue.Queue()  # Global shared progress queue
+report_exec = contextvars.ContextVar("report_exec",default=lambda msg:None)
 
-def set_progress_queue(q):
-    global _progress_queue
-    _progress_queue = q
-
-def get_progress_queue():
-    return _progress_queue
-
-def show_progress(message: str):
-    """Push a message to the Streamlit progress queue"""
-    _progress_queue.put(message)
-
+def make_progress_reporter():
+    progress_queue = queue.Queue()
+    def report(message: str):
+        progress_queue.put(message)     
+    def drain():
+      items = []
+      while not progress_queue.empty():
+        try:
+            msg = progress_queue.get_nowait()
+            items.append(msg)
+            # Show progress in loading area
+        except queue.Empty:
+              break      
+      return items
+    
+    return report,drain
 
 vector_store = None
 
@@ -210,9 +216,9 @@ def create_sql_query_or_queries(state:State):
 
   result = chain.invoke({'objects_documentation':state['objects_documentation'], 
                          'analytical_intent': state['analytical_intent'],
-                         'sql_dialect':state['sql_dialect']})
-  
-  show_progress(f"✅ SQL queries created:{len(result['query'])}")
+                         'sql_dialect':state['sql_dialect']}) 
+
+  report_exec.get()(f"✅ SQL queries created:{len(result['query'])}")
   for q in result['query']:
    state['current_sql_queries'].append( {'query': q,
                                      'explanation': '', ## add it later
