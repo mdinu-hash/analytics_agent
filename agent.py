@@ -3,11 +3,14 @@
 import pandas as pd
 import langchain, langgraph, langchain_openai, langsmith
 import os
+import queue
+import time
 import contextvars
 from pathlib import Path
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 import datetime
+import functools
 from typing_extensions import TypedDict, Annotated, Literal, Union
 from langgraph.graph.message import add_messages
 from typing import Sequence
@@ -22,7 +25,8 @@ from langchain_core.documents import Document
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
-import queue
+from openai import RateLimitError, APITimeoutError, APIConnectionError
+
 
 # Import initialization components
 from initialization import (
@@ -34,7 +38,10 @@ from initialization import (
 # Import database utility
 from initialize_demo_database.demo_database_util import execute_query
 
+# Context variables
 report_exec = contextvars.ContextVar("report_exec",default=lambda msg:None)
+max_llm_retries = contextvars.ContextVar("max_llm_retries",default=10)
+llm_retries = contextvars.ContextVar("llm_retries",default=0)
 
 def make_progress_reporter():
     progress_queue = queue.Queue()
@@ -52,6 +59,35 @@ def make_progress_reporter():
       return items
     
     return report,drain
+
+# this decorator retries the LLM calls up to max_llm_retries per context.
+def retry(times=3, delay=1, exceptions=(RateLimitError, APITimeoutError, APIConnectionError)):
+  def decorator(fn):
+    @functools.wraps(fn)
+    def wrapper(chain,invoke_params,*args,**kargs):
+      err = None      
+      for i in range(1,times+1):
+        try:
+          if llm_retries.get()<=max_llm_retries.get():
+            return fn(chain,invoke_params)
+          else:
+            raise RuntimeError(f"Maximum LLM retry limits of {max_llm_retries.get()} has been hit")                        
+        except Exception as e:
+          err = e
+          if isinstance(e,exceptions):
+            llm_retries.set(llm_retries.get()+1) # increment llm_retries
+            time.sleep(delay)
+          else:
+            raise err
+      raise err          
+    return wrapper
+  return decorator 
+
+# helper function to run LLM calls with 3 retries on rate limit errors, time out errors, network errors.
+@retry(times=3, delay=1)
+def execute_llm_call(chain,invoke_params):
+  result = chain.invoke(invoke_params) 
+  return result
 
 vector_store = None
 
@@ -89,7 +125,26 @@ class AmbiguityAnalysis(TypedDict):
   ambiguity_explanation: Annotated[str, "brief explanation of what makes the question ambiguous"]
   agent_questions: Annotated[list[str], "2-3 alternative analytical intents as questions"]
 
+# this function acts as a decorator which executes the underlying function and logs to intermediary_steps in the state the function being executed, 
+# and also the next function to be executed by the agent.
+def register_tool_run(next_tool_name=None):
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(state, *args, **kwargs):
+            result = fn(state, *args, **kwargs)
+            if isinstance(result, tuple):
+                state, dynamic_next = result
+            else:
+                state, dynamic_next = result, next_tool_name
+            state['intermediate_steps'].append(AgentAction(tool=fn.__name__, tool_input='', log='tool ran successfully'))
+            if dynamic_next:
+                state['intermediate_steps'].append(AgentAction(tool=dynamic_next, tool_input='', log=''))
+            return state  
+        return wrapper
+    return decorator
+
 @tool
+@register_tool_run(next_tool_name = 'create_sql_query_or_queries')
 def extract_analytical_intent(state:State):
   ''' Generates analytical intents when question is clear (scenario A only) '''
 
@@ -127,21 +182,17 @@ Important considerations about creating analytical intents:
   # Create analytical intent (question is already determined to be clear by clarification_check) 
   prompt_clear = ChatPromptTemplate.from_messages([('user',sys_prompt_clear)])
   chain = prompt_clear | llm.with_structured_output(AnalyticalIntents)
-  result = chain.invoke({
+  invoke_params = {
         'objects_documentation': state['objects_documentation'],
         'question': state['current_question'],
         'messages_log': extract_msg_content_from_history(state['messages_log'])
-   })
+   }
+  result = execute_llm_call(chain,invoke_params)
 
   # Update the state (scenario A already set by clarification_check)
   state['analytical_intent'] = result['analytical_intent']
   state['generate_answer_details']['ambiguity_explanation'] = ''
   state['generate_answer_details']['agent_questions'] = []
-
-  # control flow
-  action = AgentAction(tool='extract_analytical_intent', tool_input='', log='tool ran successfully')
-  state['intermediate_steps'].append(action)
-  state['intermediate_steps'].append(AgentAction(tool='create_sql_query_or_queries', tool_input='', log=''))
 
   return state
 
@@ -150,6 +201,7 @@ class OutputAsAQuery(TypedDict):
   query: Annotated[list[str],"clean sql query"]
 
 @tool
+@register_tool_run(next_tool_name = 'execute_sql_query')
 def create_sql_query_or_queries(state:State):
   """ creates sql query/queries to anwser a question based on documentation of tables and columns available """
 
@@ -214,9 +266,10 @@ def create_sql_query_or_queries(state:State):
 
   chain = prompt | llm.with_structured_output(OutputAsAQuery)
 
-  result = chain.invoke({'objects_documentation':state['objects_documentation'], 
+  invoke_params = {'objects_documentation':state['objects_documentation'], 
                          'analytical_intent': state['analytical_intent'],
-                         'sql_dialect':state['sql_dialect']}) 
+                         'sql_dialect':state['sql_dialect']}
+  result = execute_llm_call(chain,invoke_params)
 
   report_exec.get()(f"✅ SQL queries created:{len(result['query'])}")
   for q in result['query']:
@@ -225,13 +278,6 @@ def create_sql_query_or_queries(state:State):
                                      'result':'', ## add it later
                                      'insight': '' ## add it later
                                       } )
-  
-  
-  
-  # control flow
-  action = AgentAction(tool='create_sql_query_or_queries', tool_input='',log='tool ran successfully')
-  state['intermediate_steps'].append(action)
-  state['intermediate_steps'].append(AgentAction(tool='execute_sql_query', tool_input='', log=''))
   return state
 
 # since gpt-4o allows a maximum completion limit (output context limit) of 4k tokens, I half it to get maximum context size, so 2k. Assuming the entire context is not just the data,
@@ -281,8 +327,10 @@ def create_query_insight(sql_query:str, sql_query_result:str):
 
    prompt = ChatPromptTemplate.from_messages([('user',system_prompt)])
    chain = prompt | llm_fast.with_structured_output(QueryInsight)
-   return chain.invoke({'sql_query':sql_query,
-                        'sql_query_result':sql_query_result})
+   invoke_params = {'sql_query':sql_query,
+                        'sql_query_result':sql_query_result}
+   result = execute_llm_call(chain,invoke_params)
+   return result
 
 
 class QueryExplanation(TypedDict):
@@ -314,9 +362,10 @@ List of highlight types:
     prompt = ChatPromptTemplate.from_messages([('user',system_prompt)])
     chain = prompt | llm_fast.with_structured_output(QueryExplanation)
 
-    llm_explanation = chain.invoke({
+    invoke_params = {
         'sql_query': sql_query
-    })
+    }
+    llm_explanation = execute_llm_call(chain,invoke_params)
 
     return {'explanation': llm_explanation['explanation']}
 
@@ -349,7 +398,8 @@ def correct_syntax_sql_query(sql_query: str, error:str, objects_documentation: s
 
  prompt = ChatPromptTemplate.from_messages([('user',system_prompt)])
  chain = prompt | llm.with_structured_output(OutputAsASingleQuery)
- result = chain.invoke({'sql_query':sql_query,'error':error,'objects_documentation':objects_documentation, 'sql_dialect':sql_dialect})
+ invoke_params = {'sql_query':sql_query,'error':error,'objects_documentation':objects_documentation, 'sql_dialect':sql_dialect}
+ result = execute_llm_call(chain,invoke_params)
  sql_query = result['query']
  return sql_query
 
@@ -498,11 +548,11 @@ def refine_sql_query(analytical_intent: str, sql_query: str, objects_documentati
  prompt = ChatPromptTemplate.from_messages([('user',system_prompt)])
  chain = prompt | llm.with_structured_output(OutputAsASingleQuery)
 
- result = chain.invoke({'analytical_intent': analytical_intent,
+ invoke_params = {'analytical_intent': analytical_intent,
                'sql_query':sql_query,
                'objects_documentation':objects_documentation,
                'sql_dialect':sql_dialect}
-               )
+ result = execute_llm_call(chain,invoke_params)
  return result['query']
 
 # Each scenario
@@ -667,16 +717,18 @@ Suggest max 2 smart next steps for the user to explore further, chosen from the 
 
     prompt = ChatPromptTemplate.from_messages([('system',sys_prompt), ('user',state['current_question'])])
     chain = prompt | llm.with_structured_output(AgentQuestions)
-    result = chain.invoke({
+    invoke_params = {
         'messages_log': extract_msg_content_from_history(state['messages_log']),
         'objects_documentation': state['objects_documentation']
-    })
+    }
+    result = execute_llm_call(chain,invoke_params)
     return result['agent_questions']
 
 
 ## create a function that generates the agent answer based on sql query result
 
 @tool
+@register_tool_run()
 def generate_answer(state:State):
   """ generates the AI answer taking into consideration the explanation and the result of the sql query that was executed """
 
@@ -696,16 +748,12 @@ def generate_answer(state:State):
   invoke_params = next(s['Invoke_Params'](state) for s in scenario_prompts if s['Type'] == scenario)
 
   # Generate LLM response 
-  ai_msg = llm_answer_chain.invoke(invoke_params)
+  ai_msg = execute_llm_call(llm_answer_chain,invoke_params)
 
   # Update state with response, and the messages log with current question and AI response.
   state['llm_answer'] = ai_msg
   state['messages_log'].append(HumanMessage(state['current_question']))
   state['messages_log'].append(ai_msg)
-
-  # log generate answer run
-  action = AgentAction(tool='generate_answer', tool_input='', log = 'tool ran successfully')
-  state['intermediate_steps'].append(action)
 
   # control flow - route based on scenario
   if scenario == 'A':
@@ -719,10 +767,7 @@ def generate_answer(state:State):
       else:
           next_tool_name = END
 
-  action = AgentAction( tool=next_tool_name, tool_input='', log = '' )
-  state['intermediate_steps'].append(action)
-
-  return state
+  return state, next_tool_name
 
 @tool
 def manage_memory_chat_history(state:State):
@@ -734,7 +779,10 @@ def manage_memory_chat_history(state:State):
     sys_prompt = """Distill the below chat messages into a single summary paragraph.The summary paragraph should have maximum 400 tokens.Include as many specific details as you can.Chat messages:{message_history_to_summarize}"""
     prompt = ChatPromptTemplate.from_messages([('user',sys_prompt)])
     runnable = prompt | llm_fast # use the cheap model
-    chat_history_summary = runnable.invoke({'message_history_to_summarize':message_history_to_summarize})
+
+    invoke_params = {'message_history_to_summarize':message_history_to_summarize}
+    chat_history_summary = execute_llm_call(runnable,invoke_params)
+
     last_4_messages = state['messages_log'][-4:]
     state['messages_log'] = [chat_history_summary] +[*last_4_messages]
 
@@ -749,6 +797,7 @@ class ScenarioBC(TypedDict):
   next_step: Annotated[Literal["B", "C","Continue"],"indication of the next step to be performed by the agent"]
 
 @tool
+@register_tool_run()
 def clarification_check(state:State):
   ''' Determines if question is clear (scenario A) or ambiguous (scenario D) '''
 
@@ -787,28 +836,25 @@ def clarification_check(state:State):
   # Use LLM to determine if clear or ambiguous
   prompt_clear_or_ambiguous = ChatPromptTemplate.from_messages([('system',sys_prompt_clear_or_ambiguous), ('user',state['current_question'])])
   chain = prompt_clear_or_ambiguous | llm.with_structured_output(ClearOrAmbiguous)
-  result = chain.invoke({
+  invoke_params = {
         'objects_documentation': state['objects_documentation'],
         'messages_log': extract_msg_content_from_history(state['messages_log'])
-   })
+   }
+  result = execute_llm_call(chain,invoke_params)
 
   # Based on result, route appropriately
   if result['analytical_intent_clearness'] == "CLEAR":
       # Clear - set scenario A and route to extract_analytical_intent
       state['scenario'] = 'A'
-      tool_name = 'extract_analytical_intent'
+      next_tool_name = 'extract_analytical_intent'
   else:
       # Ambiguous - route to clarification (scenario D will be set there)
-      tool_name = 'clarification'
+      next_tool_name = 'clarification'
 
-  # control flow
-  action = AgentAction(tool='clarification_check', tool_input='', log='tool ran successfully')
-  state['intermediate_steps'].append(action)
-  state['intermediate_steps'].append(AgentAction(tool=tool_name, tool_input='', log=''))
-
-  return state
+  return state, next_tool_name
 
 @tool
+@register_tool_run(next_tool_name = 'generate_answer')
 def clarification(state:State):
   ''' Generates ambiguity analysis when question is ambiguous (scenario D) '''
 
@@ -848,11 +894,12 @@ def clarification(state:State):
   # Generate ambiguity analysis
   prompt_ambiguous = ChatPromptTemplate.from_messages([('user',sys_prompt_ambiguous)])
   chain = prompt_ambiguous | llm.with_structured_output(AmbiguityAnalysis)
-  result = chain.invoke({
+  invoke_params = {
         'objects_documentation': state['objects_documentation'],
         'question': state['current_question'],
         'messages_log': extract_msg_content_from_history(state['messages_log'])
-   })
+   }
+  result = execute_llm_call(chain,invoke_params)
 
   # Update state
   state['scenario'] = 'D'
@@ -860,14 +907,10 @@ def clarification(state:State):
   state['generate_answer_details']['ambiguity_explanation'] = result['ambiguity_explanation']
   state['generate_answer_details']['agent_questions'] = result['agent_questions']
 
-  # control flow
-  action = AgentAction(tool='clarification', tool_input='', log='tool ran successfully')
-  state['intermediate_steps'].append(action)
-  state['intermediate_steps'].append(AgentAction(tool='generate_answer', tool_input='', log=''))
-
   return state
 
 @tool
+@register_tool_run()
 def add_assumptions(state:State):
   ''' Generates key assumptions and appends them to the answer for transparency (only called for scenario A) '''
 
@@ -895,10 +938,6 @@ def add_assumptions(state:State):
       state['llm_answer'] = ai_msg
       state['messages_log'][-1] = ai_msg
 
-  # log add assumptions run
-  action = AgentAction(tool='add_assumptions', tool_input='', log = 'tool ran successfully')
-  state['intermediate_steps'].append(action)
-
   # control flow - check if memory management needed
   tokens_chat_history = calculate_chat_history_tokens(state['messages_log'])
   if tokens_chat_history >= 1000 and len(state['messages_log']) > 4:
@@ -906,11 +945,9 @@ def add_assumptions(state:State):
   else:
       next_tool_name = END
 
-  action = AgentAction( tool=next_tool_name, tool_input='', log = '' )
-  state['intermediate_steps'].append(action)
+  return state, next_tool_name
 
-  return state
-
+@register_tool_run()
 def orchestrator(state:State):
   ''' Orchestrator deciding if the user question requires querying the database or is asking for info not available '''
 
@@ -936,10 +973,12 @@ def orchestrator(state:State):
   
   prompt = ChatPromptTemplate.from_messages([('system',sys_prompt), ('user',state['current_question'])])
   chain = prompt | llm_fast.with_structured_output(ScenarioBC)
-  result = chain.invoke({'messages_log':extract_msg_content_from_history(state['messages_log']),
+  invoke_params = {'messages_log':extract_msg_content_from_history(state['messages_log']),
                          'insights': format_sql_query_results_for_prompt(state['current_sql_queries']),
                          'objects_documentation':state['objects_documentation']
-                         })   
+                         }
+  result = execute_llm_call(chain,invoke_params)
+
   if result['next_step'] == 'Continue':
     scenario = ''  
     agent_questions = None
@@ -960,16 +999,9 @@ def orchestrator(state:State):
 
   # update state
   state['scenario'] = scenario
-  state['generate_answer_details']['agent_questions'] = agent_questions    
+  state['generate_answer_details']['agent_questions'] = agent_questions   
 
-  # log orchestrator run
-  action = AgentAction(tool='orchestrator', tool_input='', log = 'tool ran successfully')
-  state['intermediate_steps'].append(action)  
-
-  # control flow
-  action = AgentAction( tool=next_tool_name, tool_input='', log = '' )
-  state['intermediate_steps'].append(action)  
-  return state     
+  return state,next_tool_name     
 
 # run the nodes
 
@@ -1049,6 +1081,7 @@ def reset_state(state:State):
     state['objects_documentation'] = add_key_terms_to_objects_documentation(objects_documentation, key_terms)
 
     state['sql_dialect'] = sql_dialect
+    llm_retries.set(0); # allow maximum 10 LLM call retries
     return state
 
 def router(state:State):
